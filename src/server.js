@@ -2,32 +2,20 @@ const express = require('express');
 const cors = require('cors');
 const searchRouter = require('./routes/search');
 const InvaluableScraper = require('./scrapers/invaluable');
-const storage = require('./utils/storage');
 
 const port = process.env.PORT || 8080;
-
-const requiredEnvVars = ['GOOGLE_CLOUD_PROJECT'];
-
-const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
-if (missingEnvVars.length > 0) {
-  console.error('Missing required environment variables:', missingEnvVars.join(', '));
-  process.exit(1);
-}
-
 const app = express();
 
-let invaluableScraper = null;
-let initializingInvaluable = false;
+const invaluableScraper = new InvaluableScraper();
+let isInitializing = false;
 
 // Graceful shutdown handler
 async function shutdown() {
   console.log('Shutting down gracefully...');
-  if (invaluableScraper) {
-    try {
-      await invaluableScraper.close();
-    } catch (error) {
-      console.error('Error closing scraper:', error);
-    }
+  try {
+    await invaluableScraper.close();
+  } catch (error) {
+    console.error('Error closing scraper:', error);
   }
   process.exit(0);
 }
@@ -38,27 +26,24 @@ process.on('SIGINT', shutdown);
 
 // Add health check endpoint
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'Invaluable Scraper API is running' });
+  res.json({ status: 'ok', message: 'Invaluable Search API is running' });
 });
 
 app.use(cors());
 app.use(express.json());
 
-app.locals.storage = storage;
-
 async function initializeScraper() {
-  if (initializingInvaluable) {
-    while (initializingInvaluable) {
+  if (isInitializing) {
+    while (isInitializing) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     return;
   }
 
-  initializingInvaluable = true;
+  isInitializing = true;
   console.log('Starting Invaluable scraper initialization...');
 
   try {
-    invaluableScraper = new InvaluableScraper();
     await invaluableScraper.initialize();
     app.locals.invaluableScraper = invaluableScraper;
     console.log('Invaluable scraper initialized successfully');
@@ -66,7 +51,7 @@ async function initializeScraper() {
     console.error('Error initializing Invaluable scraper:', error);
     throw error;
   } finally {
-    initializingInvaluable = false;
+    isInitializing = false;
   }
 }
 
@@ -75,11 +60,10 @@ async function startServer() {
   try {
     await initializeScraper();
     
-    app.use('/api/invaluable/furniture', searchRouter);
+    app.use('/api/search', searchRouter);
     
     const server = app.listen(port, '0.0.0.0', () => {
       console.log(`Server is now listening on port ${port}`);
-      console.log('Google Cloud Project:', process.env.GOOGLE_CLOUD_PROJECT);
     });
 
     server.on('error', (error) => {

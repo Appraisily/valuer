@@ -1,26 +1,137 @@
 const BrowserManager = require('./browser');
-const AuthManager = require('./auth');
-const FurnitureSearchManager = require('./search');
+
+const NAVIGATION_TIMEOUT = 30000;
 
 class InvaluableScraper {
   constructor() {
     this.browser = new BrowserManager();
-    this.auth = null;
-    this.furnitureSearch = null;
+    this.initialized = false;
   }
 
   async initialize() {
-    await this.browser.initialize();
-    this.auth = new AuthManager(this.browser);
-    this.furnitureSearch = new FurnitureSearchManager(this.browser);
+    if (this.initialized) {
+      console.log('Scraper already initialized');
+      return;
+    }
+
+    try {
+      console.log('Initializing browser...');
+      await this.browser.initialize();
+      this.initialized = true;
+      console.log('Browser initialized successfully');
+    } catch (error) {
+      console.error('Failed to initialize browser:', error);
+      throw error;
+    }
   }
 
   async close() {
-    await this.browser.close();
+    if (this.initialized) {
+      try {
+        await this.browser.close();
+        this.initialized = false;
+        console.log('Browser closed successfully');
+      } catch (error) {
+        console.error('Error closing browser:', error);
+        throw error;
+      }
+    }
   }
 
-  async searchFurniture(cookies) {
-    return this.furnitureSearch.searchFurniture(cookies);
+  constructSearchUrl(params = {}) {
+    const baseUrl = 'https://www.invaluable.com/search';
+    const searchParams = new URLSearchParams();
+    
+    // Add all provided parameters
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        searchParams.append(key, value);
+      }
+    });
+
+    return `${baseUrl}?${searchParams.toString()}`;
+  }
+
+  async search(params = {}, cookies = []) {
+    if (!this.initialized) {
+      throw new Error('Scraper not initialized. Call initialize() first');
+    }
+
+    try {
+      console.log('Starting Invaluable search');
+      
+      const url = this.constructSearchUrl(params);
+      console.log('Search URL:', url);
+      
+      const page = await this.browser.createTab('search');
+      let catResults = null;
+      
+      try {
+        await page.setRequestInterception(true);
+        
+        // Intercept catResults response
+        page.on('response', async response => {
+          const url = response.url();
+          if (url.includes('catResults') && response.status() === 200) {
+            try {
+              const text = await response.text();
+              catResults = JSON.parse(text);
+            } catch (error) {
+              console.error('Error parsing catResults:', error);
+            }
+          }
+        });
+        
+        // Handle requests
+        page.on('request', request => {
+          try {
+            const reqUrl = request.url();
+            const headers = request.headers();
+            
+            // Add cookies to all requests
+            headers['Cookie'] = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+            
+            if (reqUrl.includes('catResults')) {
+              headers['Accept'] = 'application/json';
+              headers['Content-Type'] = 'application/json';
+            }
+            
+            // Block unnecessary resources
+            if (request.resourceType() === 'image' || 
+                request.resourceType() === 'stylesheet' || 
+                request.resourceType() === 'font') {
+              request.abort();
+              return;
+            }
+            
+            request.continue({ headers });
+          } catch (error) {
+            if (!error.message.includes('Request is already handled')) {
+              console.error('Request handling error:', error);
+            }
+            request.continue();
+          }
+        });
+
+        // Set cookies
+        await page.setCookie(...cookies);
+        
+        // Navigate to search URL
+        await page.goto(url, {
+          waitUntil: 'networkidle2',
+          timeout: NAVIGATION_TIMEOUT
+        });
+        
+        return catResults;
+        
+      } finally {
+        await this.browser.closeTab('search');
+      }
+      
+    } catch (error) {
+      console.error('Search error:', error);
+      throw error;
+    }
   }
 }
 
