@@ -24,6 +24,9 @@ Any valid Invaluable search parameters can be used. Common parameters include:
 # Basic search
 curl "http://localhost:8080/api/search?query=furniture"
 
+# Search with price range
+curl "http://localhost:8080/api/search?query=furniture&priceResult[min]=250&priceResult[max]=500"
+
 # Search with multiple parameters
 curl "http://localhost:8080/api/search?supercategoryName=Furniture&priceResult[min]=500&priceResult[max]=5000"
 
@@ -39,7 +42,8 @@ curl "http://localhost:8080/api/search?houseName=DOYLE%20Auctioneers%20%26%20App
   "timestamp": "2024-02-14T12:34:56.789Z",
   "parameters": {
     "query": "furniture",
-    "priceResult[min]": "500"
+    "priceResult[min]": "250",
+    "priceResult[max]": "500"
   },
   "data": [
     {
