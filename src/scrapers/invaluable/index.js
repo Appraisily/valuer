@@ -42,9 +42,16 @@ class InvaluableScraper {
     const baseUrl = 'https://www.invaluable.com/search';
     const searchParams = new URLSearchParams();
     
+    // Add required furniture search parameters
+    searchParams.append('upcoming', 'false');
+    searchParams.append('query', params.query || 'furniture');
+    searchParams.append('keyword', params.keyword || params.query || 'furniture');
+    
     // Add all provided parameters
     Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null) {
+      // Skip parameters we already set
+      if (value !== undefined && value !== null && 
+          !['upcoming', 'query', 'keyword'].includes(key)) {
         searchParams.append(key, value);
       }
     });
