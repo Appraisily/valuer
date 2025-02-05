@@ -41,13 +41,15 @@ class InvaluableScraper {
   constructSearchUrl(params = {}) {
     const baseUrl = 'https://www.invaluable.com/search';
     const searchParams = new URLSearchParams();
-    
-    // Handle price range parameters
-    if (params['priceResult[min]']) {
-      searchParams.append('priceResult[min]', params['priceResult[min]']);
-    }
-    if (params['priceResult[max]']) {
-      searchParams.append('priceResult[max]', params['priceResult[max]']);
+
+    // Handle nested price range parameters
+    if (params.priceResult) {
+      if (params.priceResult.min) {
+        searchParams.append('priceResult[min]', params.priceResult.min);
+      }
+      if (params.priceResult.max) {
+        searchParams.append('priceResult[max]', params.priceResult.max);
+      }
     }
     
     // Add required furniture search parameters
@@ -59,7 +61,7 @@ class InvaluableScraper {
     Object.entries(params).forEach(([key, value]) => {
       // Skip parameters we already set
       if (value !== undefined && value !== null && 
-          !['upcoming', 'query', 'keyword', 'priceResult[min]', 'priceResult[max]'].includes(key)) {
+          !['upcoming', 'query', 'keyword', 'priceResult'].includes(key)) {
         searchParams.append(key, value);
       }
     });
