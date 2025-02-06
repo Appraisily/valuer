@@ -18,6 +18,7 @@ This API provides a simple interface to search Invaluable's catalog by:
   - Accepts all Invaluable search parameters
   - Constructs proper search URLs
   - Maintains query parameter integrity
+  - Supports price range filtering with `priceResult[min]` and `priceResult[max]`
 
 - **Browser Automation**
   - Puppeteer with Stealth Plugin
@@ -31,6 +32,7 @@ This API provides a simple interface to search Invaluable's catalog by:
   - Response validation
   - Error handling
   - Size-based filtering
+  - Detailed logging of result counts
 
 ### Technical Features
 
@@ -49,6 +51,7 @@ This API provides a simple interface to search Invaluable's catalog by:
 - Dynamic parameter support
 - Real-time response capture
 - Comprehensive error handling
+- Detailed response logging
 
 ## Prerequisites
 
@@ -61,6 +64,7 @@ This API provides a simple interface to search Invaluable's catalog by:
 Required variables in `.env`:
 ```
 GOOGLE_CLOUD_PROJECT=your-project-id
+STORAGE_BUCKET=invaluable-html-archive
 ```
 
 ## Installation
@@ -90,7 +94,7 @@ GET /api/search
 ```
 
 Query Parameters:
-- `query`: Search query
+- `query`: Search query (e.g., "Antique Victorian mahogany dining table")
 - `keyword`: Additional keyword filter
 - `supercategoryName`: Category name (e.g., "Furniture", "Fine Art")
 - `priceResult[min]`: Minimum price
@@ -103,8 +107,11 @@ Example Requests:
 # Basic search
 curl "http://localhost:8080/api/search?query=furniture"
 
-# Search with multiple parameters
-curl "http://localhost:8080/api/search?supercategoryName=Furniture&priceResult[min]=500&priceResult[max]=5000"
+# Search with price range
+curl "http://localhost:8080/api/search?query=furniture&priceResult%5Bmin%5D=1750&priceResult%5Bmax%5D=3250"
+
+# Search specific items
+curl "http://localhost:8080/api/search?query=Antique+Victorian+mahogany+dining+table&priceResult%5Bmin%5D=1750&priceResult%5Bmax%5D=3250"
 
 # Search specific auction house
 curl "http://localhost:8080/api/search?houseName=DOYLE%20Auctioneers%20%26%20Appraisers&query=antique"
@@ -116,14 +123,16 @@ Example Response:
   "success": true,
   "timestamp": "2024-02-14T12:34:56.789Z",
   "parameters": {
-    "query": "furniture",
-    "priceResult[min]": "500"
-  },
-  "data": [
-    {
-      // Captured JSON responses from catResults endpoint
+    "query": "Antique Victorian mahogany dining table",
+    "priceResult": {
+      "min": "1750",
+      "max": "3250"
     }
-  ]
+  },
+  "data": {
+    "lots": [...],
+    "totalResults": 42
+  }
 }
 ```
 
@@ -159,8 +168,8 @@ gcloud builds submit --config cloudbuild.yaml
 │   │   └── invaluable/
 │   │       ├── index.js         # Main scraper class
 │   │       ├── browser.js       # Browser management
-│   │       └── search/
-│   │           ├── api-monitor.js # Response monitoring
+│   │       ├── auth.js          # Authentication handling
+│   │       └── utils.js         # Utility functions
 │   └── routes/
 │       └── search.js            # Search endpoint
 ├── Dockerfile                    # Container configuration

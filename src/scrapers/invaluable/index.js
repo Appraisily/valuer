@@ -93,10 +93,20 @@ class InvaluableScraper {
             console.log('Intercepted catResults response');
             try {
               const text = await response.text();
-              console.log('Response text length:', text.length);
               catResults = JSON.parse(text);
-              console.log('Results found:', catResults.lots ? catResults.lots.length : 0);
-              console.log('Total results:', catResults.totalResults || 0);
+              if (catResults && catResults.results && catResults.results[0].hits) {
+                const hits = catResults.results[0].hits;
+                console.log(`Found ${hits.length} results:`);
+                hits.forEach(hit => {
+                  console.log(`
+Item: ${hit.lotTitle}
+Date: ${hit.dateTimeLocal}
+House: ${hit.houseName}
+Price: ${hit.currencySymbol}${hit.priceResult}
+Image: ${hit.photoPath}
+-------------------`);
+                });
+              }
             } catch (error) {
               console.error('Error parsing catResults:', error.message);
               console.log('Raw response text:', text.substring(0, 200) + '...');
@@ -143,12 +153,7 @@ class InvaluableScraper {
           waitUntil: 'networkidle2',
           timeout: NAVIGATION_TIMEOUT
         });
-        
-        // Log the number of results if available
-        if (catResults && catResults.lots) {
-          console.log(`Number of results found: ${catResults.lots.length}`);
-        }
-        
+                
         return catResults;
         
       } finally {

@@ -1,6 +1,32 @@
 const express = require('express');
 const router = express.Router();
 
+function formatSearchResults(catResults) {
+  if (!catResults?.results?.[0]?.hits) {
+    return { lots: [], totalResults: 0 };
+  }
+
+  const hits = catResults.results[0].hits;
+  const lots = hits.map(hit => ({
+    title: hit.lotTitle,
+    date: hit.dateTimeLocal,
+    auctionHouse: hit.houseName,
+    price: {
+      amount: hit.priceResult,
+      currency: hit.currencyCode,
+      symbol: hit.currencySymbol
+    },
+    image: hit.photoPath,
+    lotNumber: hit.lotNumber,
+    saleType: hit.saleType
+  }));
+
+  return {
+    lots,
+    totalResults: lots.length
+  };
+}
+
 router.get('/', async (req, res) => {
   try {
     const { invaluableScraper } = req.app.locals;
@@ -24,12 +50,13 @@ router.get('/', async (req, res) => {
 
     console.log('Starting search with parameters:', req.query);
     const result = await invaluableScraper.search(req.query, cookies);
+    const formattedResults = formatSearchResults(result);
     
     res.json({
       success: true,
       timestamp: new Date().toISOString(),
       parameters: req.query,
-      data: result
+      data: formattedResults
     });
     
   } catch (error) {
