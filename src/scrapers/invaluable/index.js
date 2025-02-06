@@ -139,6 +139,11 @@ class InvaluableScraper {
           timeout: NAVIGATION_TIMEOUT
         });
         
+        // Log the number of results if available
+        if (catResults && catResults.lots) {
+          console.log(`Number of results found: ${catResults.lots.length}`);
+        }
+        
         return catResults;
         
       } finally {
