@@ -90,11 +90,16 @@ class InvaluableScraper {
         page.on('response', async response => {
           const url = response.url();
           if (url.includes('catResults') && response.status() === 200) {
+            console.log('Intercepted catResults response');
             try {
               const text = await response.text();
+              console.log('Response text length:', text.length);
               catResults = JSON.parse(text);
+              console.log('Results found:', catResults.lots ? catResults.lots.length : 0);
+              console.log('Total results:', catResults.totalResults || 0);
             } catch (error) {
-              console.error('Error parsing catResults:', error);
+              console.error('Error parsing catResults:', error.message);
+              console.log('Raw response text:', text.substring(0, 200) + '...');
             }
           }
         });
