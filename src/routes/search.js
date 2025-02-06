@@ -1,6 +1,14 @@
 const express = require('express');
 const router = express.Router();
 
+function formatPrice(hit) {
+  return {
+    amount: hit.priceResult,
+    currency: hit.currencyCode,
+    symbol: hit.currencySymbol
+  };
+}
+
 function formatSearchResults(catResults) {
   if (!catResults?.results?.[0]?.hits) {
     return { lots: [], totalResults: 0 };
@@ -11,11 +19,7 @@ function formatSearchResults(catResults) {
     title: hit.lotTitle,
     date: hit.dateTimeLocal,
     auctionHouse: hit.houseName,
-    price: {
-      amount: hit.priceResult,
-      currency: hit.currencyCode,
-      symbol: hit.currencySymbol
-    },
+    price: formatPrice(hit),
     image: hit.photoPath,
     lotNumber: hit.lotNumber,
     saleType: hit.saleType
@@ -27,6 +31,25 @@ function formatSearchResults(catResults) {
   };
 }
 
+function standardizeResponse(data, parameters = {}) {
+  return {
+    success: true,
+    timestamp: new Date().toISOString(),
+    parameters: {
+      ...parameters,
+      // Convert price parameters to nested object if they exist
+      ...(parameters['priceResult[min]'] || parameters['priceResult[max]']) && {
+        priceResult: {
+          min: parameters['priceResult[min]'],
+          max: parameters['priceResult[max]']
+        }
+      }
+    },
+    data: data
+  };
+}
+
+// Search endpoint
 router.get('/', async (req, res) => {
   try {
     const { invaluableScraper } = req.app.locals;
@@ -51,11 +74,7 @@ router.get('/', async (req, res) => {
     console.log('Starting search with parameters:', req.query);
     const result = await invaluableScraper.search(req.query, cookies);
     const formattedResults = formatSearchResults(result);
-    
-    res.json({
-      success: true,
-      timestamp: new Date().toISOString(),
-      parameters: req.query,
+    res.json(standardizeResponse({
       data: formattedResults
     });
     
@@ -67,5 +86,3 @@ router.get('/', async (req, res) => {
     });
   }
 });
-
-module.exports = router;
