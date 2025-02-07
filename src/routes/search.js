@@ -74,9 +74,7 @@ router.get('/', async (req, res) => {
     console.log('Starting search with parameters:', req.query);
     const result = await invaluableScraper.search(req.query, cookies);
     const formattedResults = formatSearchResults(result);
-    res.json(standardizeResponse({
-      data: formattedResults
-    });
+    res.json(standardizeResponse(formattedResults, req.query));
     
   } catch (error) {
     console.error('Error in search route:', error);
