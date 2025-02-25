@@ -322,7 +322,8 @@ class InvaluableScraper {
       let totalItems = 0;
       let totalPagesFound = 1;
       let successfulPages = [];
-      let cookieState = cookies;
+      let failedPages = [];
+      let cookieState = cookies || [];
       
       // Inicializar con la primera página
       console.log(`Obteniendo página 1...`);
@@ -342,11 +343,26 @@ class InvaluableScraper {
       successfulPages.push(1);
       
       // MEJORA 1: Extracción de metadatos para calcular número total de páginas
+      // Verificar si los metadatos están en meta o en la propia estructura
+      let totalHits = null;
+      
       if (firstPageResults.results[0].meta && firstPageResults.results[0].meta.totalHits) {
-        const totalHits = firstPageResults.results[0].meta.totalHits;
-        totalPagesFound = Math.ceil(totalHits / 96); // 96 es el tamaño estándar de página
+        totalHits = firstPageResults.results[0].meta.totalHits;
+        console.log(`Total de hits desde meta: ${totalHits}`);
+      } else if (firstPageResults.results[0].nbHits) {
+        totalHits = firstPageResults.results[0].nbHits;
+        console.log(`Total de hits desde nbHits: ${totalHits}`);
+      } else if (firstPageResults.nbHits) {
+        totalHits = firstPageResults.nbHits;
+        console.log(`Total de hits desde raíz nbHits: ${totalHits}`);
+      }
+      
+      if (totalHits) {
+        const hitsPerPage = firstPageResults.hitsPerPage || firstPageResults.results[0].hitsPerPage || 96; // Valor por defecto
+        totalPagesFound = Math.ceil(totalHits / hitsPerPage);
         console.log(`Total de hits reportados: ${totalHits}, total estimado de páginas: ${totalPagesFound}`);
         totalPagesFound = Math.min(totalPagesFound, maxPages);
+        console.log(`Limitando a ${totalPagesFound} páginas según configuración maxPages: ${maxPages}`);
       } else {
         console.log('No se encontraron metadatos de totalHits, usando maxPages como límite');
         totalPagesFound = maxPages;
@@ -356,75 +372,84 @@ class InvaluableScraper {
       if (firstPageResults.cookies && firstPageResults.cookies.length > 0) {
         cookieState = firstPageResults.cookies;
         console.log(`Se obtuvieron ${cookieState.length} cookies actualizadas de la primera página`);
-      }
-      
-      // Si hay menos del tamaño normal de página (96) o 0 elementos, hemos terminado
-      if (firstPageHitsCount < 96 || firstPageHitsCount === 0 || totalPagesFound <= 1) {
-        console.log(`Solo hay una página de resultados o se alcanzó el límite`);
-        return allResults;
-      }
-      
-      // Crear todas las promesas de búsqueda para las páginas 2 a totalPagesFound
-      const pagePromises = [];
-      
-      for (let page = 2; page <= totalPagesFound; page++) {
-        // Breve espera aleatoria para simular comportamiento humano
-        const randomWait = 500 + Math.floor(Math.random() * 1000);
-        await new Promise(resolve => setTimeout(resolve, randomWait));
         
-        console.log(`Obteniendo página ${page}...`);
-        const pageParams = { ...params, page };
+        // Verificar cookies críticas específicas
+        const cfClearance = cookieState.find(c => c.name === 'cf_clearance');
+        const azToken = cookieState.find(c => c.name === 'AZTOKEN-PROD');
         
-        // Añadir la promesa de búsqueda para esta página utilizando las cookies actualizadas
-        pagePromises.push(this.search(pageParams, cookieState)
-          .then(pageResult => {
-            if (pageResult && pageResult.results && pageResult.results[0] && pageResult.results[0].hits) {
-              const hitsCount = pageResult.results[0].hits.length;
-              console.log(`Se encontraron ${hitsCount} resultados en la página ${page}`);
-              
-              // MEJORA 4: Actualizar cookies si hay nuevas
-              if (pageResult.cookies && pageResult.cookies.length > 0) {
-                cookieState = pageResult.cookies;
-                console.log(`Cookies actualizadas desde la página ${page}`);
-              }
-              
-              successfulPages.push(page);
-              return pageResult;
-            }
-            console.log(`No se encontraron resultados válidos en la página ${page}`);
-            return null;
-          })
-          .catch(err => {
-            console.error(`Error al obtener la página ${page}:`, err);
-            return null;
-          })
-        );
-      }
-      
-      // Ejecutar todas las búsquedas en paralelo (con límite inteligente para no sobrecargar)
-      // Podemos limitar la concurrencia a un máximo de 2 para reducir la probabilidad de detección
-      const concurrencyLimit = 2;
-      const pageResults = [];
-      
-      for (let i = 0; i < pagePromises.length; i += concurrencyLimit) {
-        const batch = pagePromises.slice(i, i + concurrencyLimit);
-        const batchResults = await Promise.all(batch);
-        pageResults.push(...batchResults);
+        if (cfClearance) {
+          console.log(`Cookie cf_clearance encontrada: ${cfClearance.value.substring(0, 20)}...`);
+        }
         
-        // Espera breve entre lotes
-        if (i + concurrencyLimit < pagePromises.length) {
-          await new Promise(resolve => setTimeout(resolve, 1000));
+        if (azToken) {
+          console.log(`Cookie AZTOKEN-PROD encontrada: ${azToken.value}`);
         }
       }
       
-      // Combinar todos los resultados
-      for (let i = 0; i < pageResults.length; i++) {
-        const pageResult = pageResults[i];
-        if (pageResult && pageResult.results && pageResult.results[0] && pageResult.results[0].hits) {
-          allResults.results[0].hits = [
-            ...allResults.results[0].hits,
-            ...pageResult.results[0].hits
-          ];
+      // Si hay menos del tamaño normal de página o 0 elementos, o solo hay una página, hemos terminado
+      if (firstPageHitsCount < 96 || firstPageHitsCount === 0 || totalPagesFound <= 1) {
+        console.log(`Solo hay una página de resultados o se alcanzó el límite`);
+        allResults.finalCookies = cookieState;
+        allResults.pagesRetrieved = successfulPages;
+        allResults.totalPagesFound = totalPagesFound;
+        return allResults;
+      }
+      
+      // Limitar la concurrencia para no sobrecargar el servicio y evitar detección
+      const concurrencyLimit = 2;
+      
+      // Procesar páginas en lotes para mantener control sobre las cookies actualizadas
+      for (let page = 2; page <= totalPagesFound; page++) {
+        try {
+          // Breve espera aleatoria para simular comportamiento humano
+          const randomWait = 1000 + Math.floor(Math.random() * 2000);
+          await new Promise(resolve => setTimeout(resolve, randomWait));
+          
+          console.log(`Obteniendo página ${page}...`);
+          console.log(`Usando ${cookieState.length} cookies para la solicitud de página ${page}`);
+          
+          const pageParams = { ...params, page };
+          
+          // Realizar la búsqueda con las cookies más actualizadas
+          const pageResult = await this.search(pageParams, cookieState);
+          
+          if (pageResult && pageResult.results && pageResult.results[0] && pageResult.results[0].hits) {
+            const hitsCount = pageResult.results[0].hits.length;
+            console.log(`Se encontraron ${hitsCount} resultados en la página ${page}`);
+            
+            // Añadir los resultados al conjunto total
+            allResults.results[0].hits = [
+              ...allResults.results[0].hits,
+              ...pageResult.results[0].hits
+            ];
+            
+            // Actualizar cookies si hay nuevas
+            if (pageResult.cookies && pageResult.cookies.length > 0) {
+              cookieState = pageResult.cookies;
+              console.log(`Cookies actualizadas desde la página ${page} (${cookieState.length} cookies)`);
+              
+              // Verificar cambios en cookies críticas
+              const cfClearance = cookieState.find(c => c.name === 'cf_clearance');
+              if (cfClearance) {
+                console.log(`Nueva cookie cf_clearance en página ${page}: ${cfClearance.value.substring(0, 20)}...`);
+              }
+            }
+            
+            successfulPages.push(page);
+          } else {
+            console.log(`No se encontraron resultados válidos en la página ${page}`);
+            failedPages.push(page);
+          }
+          
+        } catch (err) {
+          console.error(`Error al obtener la página ${page}:`, err.message);
+          failedPages.push(page);
+        }
+        
+        // Añadir una pausa entre páginas si no es la última
+        if (page < totalPagesFound) {
+          const pauseTime = 800 + Math.floor(Math.random() * 1200);
+          await new Promise(resolve => setTimeout(resolve, pauseTime));
         }
       }
       
@@ -436,9 +461,14 @@ class InvaluableScraper {
         
         if (allResults.results[0].meta) {
           allResults.results[0].meta.totalHits = totalItems;
-          allResults.results[0].meta.pagesRetrieved = successfulPages;
         }
       }
+      
+      // Añadir información adicional al resultado final
+      allResults.pagesRetrieved = successfulPages;
+      allResults.failedPages = failedPages;
+      allResults.totalPagesFound = totalPagesFound;
+      allResults.totalItemsCollected = totalItems;
       
       // Añadir información sobre el estado final de las cookies
       if (cookieState && cookieState.length > 0) {
