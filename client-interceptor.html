@@ -141,7 +141,7 @@
 
     <div>
         <h2>Send to API</h2>
-        <input type="text" id="apiEndpoint" placeholder="Your API endpoint, e.g., http://localhost:8080/api/search/direct" value="http://localhost:8080/api/search/direct">
+        <input type="text" id="apiEndpoint" placeholder="Your API endpoint" value="https://valuer-dev-856401495068.us-central1.run.app/api/search/direct">
         <button id="sendButton">Send Current Page to API</button>
         <button id="sendCombinedButton" disabled>Send Combined Pages to API</button>
     </div>
@@ -551,9 +551,10 @@
                 const pageInfo = data?.results?.[0]?.meta || {};
                 const itemCount = data?.results?.[0]?.hits?.length || 0;
                 
-                // Prompt user
+                // Prompt user with the full URL to your interceptor
                 if (confirm(\`📄 Page \${pageNum} data intercepted with \${itemCount} items! Open in interceptor page?\`)) {
-                    const interceptorUrl = 'http://your-interceptor-page-url.html#' + encodedData;
+                    // Replace with your actual interceptor URL - could be localhost or the deployed version
+                    const interceptorUrl = 'https://YOUR-ACTUAL-INTERCEPTOR-URL.html#' + encodedData;
                     window.open(interceptorUrl, '_blank');
                 }
             } catch (e) {
@@ -569,8 +570,35 @@
         return Object.values(window.interceptedPages);
     };
     
+    // Add helper to export all pages as a single JSON string
+    window.exportAllPages = function() {
+        const pages = Object.values(window.interceptedPages);
+        if (pages.length === 0) {
+            return "No pages collected yet";
+        }
+        
+        // Combine the pages
+        let combined = JSON.parse(JSON.stringify(pages[0]));
+        for (let i = 1; i < pages.length; i++) {
+            if (pages[i]?.results?.[0]?.hits) {
+                combined.results[0].hits = [
+                    ...combined.results[0].hits,
+                    ...pages[i].results[0].hits
+                ];
+            }
+        }
+        
+        // Update metadata
+        if (combined.results?.[0]?.meta) {
+            combined.results[0].meta.totalHits = combined.results[0].hits.length;
+        }
+        
+        return JSON.stringify(combined);
+    };
+    
     console.log('🔍 Invaluable API Interceptor with pagination support activated!');
     console.log('To get all pages collected, use window.getAllInterceptedPages()');
+    console.log('To export all pages as a combined JSON string, use window.exportAllPages()');
 })();
 `;
 
