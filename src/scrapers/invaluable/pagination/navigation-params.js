@@ -52,7 +52,7 @@ function extractNavigationParams(firstPageResults) {
     const foundKeys = inspectResponse(firstPageResults);
     console.log('Claves importantes encontradas en firstPageResults:', foundKeys);
 
-    // Extraer de diferentes ubicaciones posibles
+    // Verificar directamente en el objeto raíz
     if (firstPageResults.refId) {
       refId = firstPageResults.refId;
       console.log(`✅ refId encontrado directamente en firstPageResults: ${refId}`);
@@ -63,17 +63,39 @@ function extractNavigationParams(firstPageResults) {
       refId = firstPageResults.searcherInfo.refId;
       console.log(`✅ refId encontrado en firstPageResults.searcherInfo: ${refId}`);
     }
+    
+    // Verificar en la estructura anidada results[0]
+    if (!refId && firstPageResults.results && firstPageResults.results[0]) {
+      const firstResult = firstPageResults.results[0];
+      
+      if (firstResult.refId) {
+        refId = firstResult.refId;
+        console.log(`✅ refId encontrado en firstPageResults.results[0]: ${refId}`);
+      } else if (firstResult.pagination && firstResult.pagination.refId) {
+        refId = firstResult.pagination.refId;
+        console.log(`✅ refId encontrado en firstPageResults.results[0].pagination: ${refId}`);
+      } else if (firstResult.searcherInfo && firstResult.searcherInfo.refId) {
+        refId = firstResult.searcherInfo.refId;
+        console.log(`✅ refId encontrado en firstPageResults.results[0].searcherInfo: ${refId}`);
+      }
+    }
 
-    // Extraer searchContext
+    // Extraer searchContext (primero del objeto raíz, luego de results[0])
     if (firstPageResults.searchContext) {
       searchContext = firstPageResults.searchContext;
       console.log(`✅ searchContext encontrado: ${searchContext}`);
+    } else if (firstPageResults.results && firstPageResults.results[0] && firstPageResults.results[0].searchContext) {
+      searchContext = firstPageResults.results[0].searchContext;
+      console.log(`✅ searchContext encontrado en results[0]: ${searchContext}`);
     }
 
-    // Extraer searcher
+    // Extraer searcher (primero del objeto raíz, luego de results[0])
     if (firstPageResults.searcher) {
       searcher = firstPageResults.searcher;
       console.log(`✅ searcher encontrado: ${searcher}`);
+    } else if (firstPageResults.results && firstPageResults.results[0] && firstPageResults.results[0].searcher) {
+      searcher = firstPageResults.results[0].searcher;
+      console.log(`✅ searcher encontrado en results[0]: ${searcher}`);
     }
   }
   
@@ -158,7 +180,7 @@ function extractFromApiResponse(response) {
       console.log('Claves importantes encontradas en la respuesta API:', foundKeys);
     }
     
-    // Extraer refId
+    // Extraer refId del objeto raíz
     if (response.refId) {
       result.refId = response.refId;
       console.log(`✅ refId extraído de la respuesta API: ${result.refId}`);
@@ -170,16 +192,37 @@ function extractFromApiResponse(response) {
       console.log(`✅ refId extraído de response.searcherInfo: ${result.refId}`);
     }
     
-    // Extraer searchContext
+    // Si no se encontró en la raíz, buscar en results[0]
+    if (!result.refId && response.results && response.results[0]) {
+      const firstResult = response.results[0];
+      if (firstResult.refId) {
+        result.refId = firstResult.refId;
+        console.log(`✅ refId extraído de response.results[0]: ${result.refId}`);
+      } else if (firstResult.pagination && firstResult.pagination.refId) {
+        result.refId = firstResult.pagination.refId;
+        console.log(`✅ refId extraído de response.results[0].pagination: ${result.refId}`);
+      } else if (firstResult.searcherInfo && firstResult.searcherInfo.refId) {
+        result.refId = firstResult.searcherInfo.refId;
+        console.log(`✅ refId extraído de response.results[0].searcherInfo: ${result.refId}`);
+      }
+    }
+    
+    // Extraer searchContext (primero del objeto raíz, luego de results[0])
     if (response.searchContext) {
       result.searchContext = response.searchContext;
       console.log(`✅ searchContext extraído de la respuesta API: ${result.searchContext}`);
+    } else if (response.results && response.results[0] && response.results[0].searchContext) {
+      result.searchContext = response.results[0].searchContext;
+      console.log(`✅ searchContext extraído de response.results[0]: ${result.searchContext}`);
     }
     
-    // Extraer searcher
+    // Extraer searcher (primero del objeto raíz, luego de results[0])
     if (response.searcher) {
       result.searcher = response.searcher;
       console.log(`✅ searcher extraído de la respuesta API: ${result.searcher}`);
+    } else if (response.results && response.results[0] && response.results[0].searcher) {
+      result.searcher = response.results[0].searcher;
+      console.log(`✅ searcher extraído de response.results[0]: ${result.searcher}`);
     }
   } catch (error) {
     console.error(`Error al extraer parámetros de la respuesta API: ${error.message}`);

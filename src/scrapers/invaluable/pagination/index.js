@@ -26,19 +26,26 @@ const {
  * @param {Array} initialCookies - Cookies iniciales
  * @param {number} maxPages - Número máximo de páginas a procesar
  * @param {Object} config - Configuración adicional
- * @returns {Promise<Array>} - Array con todos los resultados
+ * @returns {Promise<Object>} - Objeto con todos los resultados y metadatos
  */
 async function handlePagination(browser, params, firstPageResults, initialCookies, maxPages = 100, config = {}) {
   console.log('🔄 Iniciando manejo de paginación');
   
   // Inicializar variables para almacenar resultados y estado
-  const allResults = [];
+  const allResults = JSON.parse(JSON.stringify(firstPageResults)); // Copia profunda para preservar estructura
   const processedIds = new Set();
   const successfulPages = new Set([1]); // La página 1 ya está procesada
   const failedPages = new Set();
   
-  // Sanitizar cookies iniciales
-  const cookiesState = sanitizeCookies(initialCookies || []);
+  // Sanitizar cookies iniciales o usar las cookies recibidas en la respuesta
+  let cookiesState;
+  if (firstPageResults && firstPageResults.cookies && firstPageResults.cookies.length > 0) {
+    cookiesState = sanitizeCookies(firstPageResults.cookies);
+    console.log(`Usando ${cookiesState.length} cookies de la respuesta inicial`);
+  } else {
+    cookiesState = sanitizeCookies(initialCookies || []);
+    console.log(`Usando ${cookiesState.length} cookies iniciales proporcionadas`);
+  }
   
   // Extraer parámetros de navegación de los resultados de la primera página
   const { refId, searchContext, searcher } = extractNavigationParams(firstPageResults);
@@ -53,15 +60,38 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
   };
   
   // Procesar los resultados de la primera página
-  if (firstPageResults && firstPageResults.hits) {
-    processPageResults(firstPageResults, allResults, processedIds);
+  // Adaptamos para manejar la estructura de Invaluable donde los hits están en results[0].hits
+  const firstPageHits = firstPageResults.results?.[0]?.hits;
+  if (firstPageHits && Array.isArray(firstPageHits)) {
+    // Procesar directamente los resultados de la primera página
+    firstPageHits.forEach(item => {
+      const itemId = item.lotId || item.id || JSON.stringify(item);
+      if (!processedIds.has(itemId)) {
+        processedIds.add(itemId);
+      }
+    });
+    console.log(`Procesados ${firstPageHits.length} resultados de la primera página`);
   } else {
     console.warn('❌ Los resultados de la primera página no contienen hits válidos');
-    return [];
+    return firstPageResults; // Devolver los resultados originales sin modificar
   }
   
   // Extraer metadatos de los resultados
-  const { totalItems, totalPages } = extractResultsMetadata(firstPageResults);
+  // Adaptado para la estructura específica de Invaluable
+  let totalItems = 0;
+  let totalPages = 0;
+  
+  if (firstPageResults.results?.[0]?.meta?.totalHits) {
+    totalItems = firstPageResults.results[0].meta.totalHits;
+    const hitsPerPage = firstPageResults.results[0].meta.hitsPerPage || firstPageHits.length;
+    totalPages = Math.ceil(totalItems / hitsPerPage);
+    console.log(`Metadatos: ${totalItems} elementos en ${totalPages} páginas (tamaño de página: ${hitsPerPage})`);
+  } else {
+    // Fallback: usar el length de los hits y maxPages
+    totalItems = firstPageHits ? firstPageHits.length : 0;
+    totalPages = maxPages;
+    console.log(`No se encontraron metadatos completos. Usando totalItems=${totalItems}, totalPages=${totalPages}`);
+  }
   
   // Calcular cuántas páginas procesar (basado en el mínimo entre maxPages y totalPages)
   const pagesToProcess = Math.min(maxPages, totalPages || 1);
@@ -74,7 +104,7 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
   }
   
   // Crear una nueva pestaña para las solicitudes API
-  const page = await browser.newPage();
+  const page = await browser.createTab('paginationTab');
   
   try {
     // Navegar a Invaluable para establecer cookies
@@ -127,11 +157,28 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
         navState.cookies = await updateCookiesAfterRequest(page, navState.cookies, pageNum);
         
         // Procesar resultados obtenidos
-        if (pageResults && pageResults.hits) {
-          const { newResults, duplicates } = processPageResults(pageResults, allResults, processedIds);
+        // Adaptado para la estructura específica de Invaluable
+        if (pageResults && pageResults.results && pageResults.results[0]?.hits) {
+          const pageHits = pageResults.results[0].hits;
+          let newResults = 0;
+          let duplicates = 0;
+          
+          // Procesar cada hit y añadir a los resultados acumulados
+          pageHits.forEach(item => {
+            const itemId = item.lotId || item.id || JSON.stringify(item);
+            if (!processedIds.has(itemId)) {
+              allResults.results[0].hits.push(item);
+              processedIds.add(itemId);
+              newResults++;
+            } else {
+              duplicates++;
+            }
+          });
+          
+          console.log(`✅ Resultados agregados: ${newResults} nuevos, ${duplicates} duplicados, total acumulado: ${allResults.results[0].hits.length}`);
           
           // Verificar si hay resultados diferentes
-          const hasDifferentResults = checkIfDifferentResults(pageResults.hits, processedIds);
+          const hasDifferentResults = newResults > 0;
           
           if (hasDifferentResults) {
             successfulPages.add(pageNum);
@@ -140,9 +187,19 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
             console.warn(`❌ Página ${pageNum} no contiene resultados diferentes, posible problema de paginación`);
           }
           
+          // Actualizar metadatos en el resultado acumulado
+          if (allResults.results[0].meta) {
+            allResults.results[0].meta.totalHits = allResults.results[0].hits.length;
+          }
+          
           // Verificar si debemos continuar
-          if (!shouldContinueProcessing(allResults, totalItems, config.maxResults || 0)) {
-            console.log('Finalizando paginación tempranamente debido a límites alcanzados');
+          const maxResults = config.maxResults || 0;
+          const reachedTotalItems = allResults.results[0].hits.length >= totalItems;
+          const reachedMaxResults = maxResults > 0 && allResults.results[0].hits.length >= maxResults;
+          
+          if (reachedTotalItems || reachedMaxResults) {
+            const reason = reachedTotalItems ? 'total de items' : 'límite máximo configurado';
+            console.log(`Finalizando paginación tempranamente: alcanzado ${reason}`);
             break;
           }
         } else {
@@ -161,10 +218,16 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
     console.error(`Error general durante la paginación: ${error.message}`);
   } finally {
     // Cerrar la pestaña
-    await page.close();
+    await browser.closeTab('paginationTab');
+    
+    // Añadir información de paginación al resultado
+    allResults.pagesRetrieved = Array.from(successfulPages);
+    allResults.failedPages = Array.from(failedPages);
+    allResults.totalPagesFound = totalPages;
+    allResults.finalCookies = navState.cookies;
     
     console.log(`\n===== Resultados finales =====`);
-    console.log(`✅ Total de resultados obtenidos: ${allResults.length}`);
+    console.log(`✅ Total de resultados obtenidos: ${allResults.results[0].hits.length}`);
     console.log(`✅ Páginas procesadas con éxito: ${successfulPages.size}`);
     console.log(`❌ Páginas con errores: ${failedPages.size}`);
   }
@@ -242,8 +305,9 @@ async function requestPageResults(page, pageNum, params, navState) {
       response = await makeApiRequest(page, url, headers, payload);
     }
     
-    if (response && response.hits) {
-      console.log(`✅ Obtenidos ${response.hits.length} resultados para la página ${pageNum}`);
+    // Verificar respuesta válida (adaptado para la estructura específica de Invaluable)
+    if (response && response.results && response.results[0]?.hits) {
+      console.log(`✅ Obtenidos ${response.results[0].hits.length} resultados para la página ${pageNum}`);
       return response;
     } else {
       console.error(`Error en la respuesta:`, response);

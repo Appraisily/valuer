@@ -153,16 +153,32 @@ function buildRequestHeaders(cookies, referer = 'https://www.invaluable.com/sear
  * @returns {Object} - Payload para la solicitud
  */
 function buildResultsPayload(params, pageNum, navState) {
+  // Crear un formato de solicitud basado en la estructura real que usa Invaluable
+  // Se basa en el formato capturado en las respuestas de la primera página
   const payload = {
-    q: params.query || '',
-    keyword: params.keyword || '',
-    productId: params.productId || 0,
-    pageNum: pageNum,
-    pageSize: params.pageSize || 48,
-    isBack: false
+    query: params.query || '',
+    upcoming: 'false',
+    page: pageNum,
+    keyword: params.keyword || params.query || '',
+    timestamp: Date.now(),
   };
   
-  // Añadir refId si está disponible
+  // Verificar si tenemos pageSize en los parámetros
+  if (params.pageSize) {
+    payload.pageSize = params.pageSize;
+  }
+  
+  // Verificar si tenemos parámetros de precio
+  if (params.priceResult) {
+    if (params.priceResult.min) {
+      payload['priceResult[min]'] = params.priceResult.min;
+    }
+    if (params.priceResult.max) {
+      payload['priceResult[max]'] = params.priceResult.max;
+    }
+  }
+  
+  // Añadir refId si está disponible (clave para paginación)
   if (navState.refId) {
     payload.refId = navState.refId;
     console.log(`Usando refId para página ${pageNum}: ${navState.refId}`);
@@ -181,6 +197,22 @@ function buildResultsPayload(params, pageNum, navState) {
     payload.searcher = navState.searcher;
     console.log(`Usando searcher para página ${pageNum}: ${navState.searcher}`);
   }
+  
+  // Agregar cualquier otro parámetro que no sea null o undefined
+  Object.entries(params).forEach(([key, value]) => {
+    if (
+      value !== undefined && 
+      value !== null && 
+      !['query', 'keyword', 'page', 'pageSize', 'priceResult', 'cookies'].includes(key) &&
+      typeof value !== 'object'
+    ) {
+      payload[key] = value;
+    }
+  });
+  
+  // Añadir campos adicionales que pueden ayudar con la compatibilidad
+  payload.clientType = 'web';
+  payload.requestId = `req_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   
   return payload;
 }
