@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invaluable API Interceptor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        pre {
+            background-color: #f4f4f4;
+            padding: 10px;
+            border-radius: 5px;
+            overflow: auto;
+        }
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 10px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            box-sizing: border-box;
+        }
+        .instructions {
+            background-color: #ffffd9;
+            border: 1px solid #e7e7ca;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Invaluable API Interceptor</h1>
+    
+    <div class="instructions">
+        <h2>Instructions</h2>
+        <ol>
+            <li>Open <a href="https://www.invaluable.com/search" target="_blank">Invaluable Search</a> in a new tab</li>
+            <li>Open browser developer tools (F12 or right-click > Inspect)</li>
+            <li>Go to Network tab and filter for "catResults"</li>
+            <li>Perform your search on Invaluable</li>
+            <li>When you see the catResults API call, right-click > Copy > Copy Response</li>
+            <li>Paste the API response in the textarea below</li>
+            <li>Click "Process API Data" to format it</li>
+            <li>Optional: Enter your API endpoint and click "Send to API" to send the data to your service</li>
+        </ol>
+    </div>
+
+    <div>
+        <h2>API Response Data</h2>
+        <textarea id="apiResponseData" rows="10" placeholder="Paste the catResults API response here..."></textarea>
+        <button id="processButton">Process API Data</button>
+    </div>
+
+    <div>
+        <h2>Results</h2>
+        <pre id="resultsOutput">Results will appear here after processing...</pre>
+    </div>
+
+    <div>
+        <h2>Send to API</h2>
+        <input type="text" id="apiEndpoint" placeholder="Your API endpoint, e.g., http://localhost:8080/api/search/direct" value="http://localhost:8080/api/search/direct">
+        <button id="sendButton">Send to API</button>
+    </div>
+
+    <div>
+        <h2>API Response</h2>
+        <pre id="apiResponseOutput">API response will appear here...</pre>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const apiResponseData = document.getElementById('apiResponseData');
+            const processButton = document.getElementById('processButton');
+            const resultsOutput = document.getElementById('resultsOutput');
+            const apiEndpoint = document.getElementById('apiEndpoint');
+            const sendButton = document.getElementById('sendButton');
+            const apiResponseOutput = document.getElementById('apiResponseOutput');
+
+            // Process API data
+            processButton.addEventListener('click', function() {
+                try {
+                    const data = JSON.parse(apiResponseData.value);
+                    
+                    // Format and display the results
+                    let formattedResults = formatSearchResults(data);
+                    resultsOutput.textContent = JSON.stringify(formattedResults, null, 2);
+                } catch (error) {
+                    resultsOutput.textContent = `Error processing data: ${error.message}`;
+                }
+            });
+
+            // Send data to API
+            sendButton.addEventListener('click', async function() {
+                try {
+                    const data = JSON.parse(apiResponseData.value);
+                    const endpoint = apiEndpoint.value;
+                    
+                    apiResponseOutput.textContent = 'Sending data to API...';
+                    
+                    const response = await fetch(endpoint, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            apiData: data,
+                            searchParams: extractSearchParams()
+                        })
+                    });
+                    
+                    const responseData = await response.json();
+                    apiResponseOutput.textContent = JSON.stringify(responseData, null, 2);
+                } catch (error) {
+                    apiResponseOutput.textContent = `Error sending data: ${error.message}`;
+                }
+            });
+
+            // Helper function to extract search parameters from URL
+            function extractSearchParams() {
+                const params = {};
+                const url = new URL(window.location.href);
+                for (const [key, value] of url.searchParams.entries()) {
+                    params[key] = value;
+                }
+                return params;
+            }
+
+            // Function to format search results (same as in your server code)
+            function formatSearchResults(catResults) {
+                if (!catResults?.results?.[0]?.hits) {
+                    return { lots: [], totalResults: 0 };
+                }
+
+                const hits = catResults.results[0].hits;
+                const lots = hits.map(hit => ({
+                    title: hit.lotTitle,
+                    date: hit.dateTimeLocal,
+                    auctionHouse: hit.houseName,
+                    price: {
+                        amount: hit.priceResult,
+                        currency: hit.currencyCode,
+                        symbol: hit.currencySymbol
+                    },
+                    image: hit.photoPath,
+                    lotNumber: hit.lotNumber,
+                    saleType: hit.saleType
+                }));
+
+                return {
+                    lots,
+                    totalResults: lots.length
+                };
+            }
+
+            // Check if we were sent here from Invaluable with data in URL hash
+            window.addEventListener('load', function() {
+                if (window.location.hash) {
+                    try {
+                        const hashData = decodeURIComponent(window.location.hash.substring(1));
+                        apiResponseData.value = hashData;
+                        processButton.click();
+                    } catch (error) {
+                        console.error('Error processing hash data:', error);
+                    }
+                }
+            });
+
+            // Add interceptor code to be run in Invaluable console
+            const interceptorCode = `
+// Invaluable API Interceptor
+// Run this in browser console on Invaluable site
+(function() {
+    const originalFetch = window.fetch;
+    window.fetch = async function(...args) {
+        const response = await originalFetch(...args);
+        
+        // Clone the response so we can read it multiple times
+        const clone = response.clone();
+        
+        // Check if it's a catResults API call
+        if (response.url.includes('catResults')) {
+            try {
+                console.log('Intercepted catResults API call');
+                const data = await clone.json();
+                
+                // Log the data in console for easy copying
+                console.log('API Data:', data);
+                
+                // Create a popup with the data
+                const dataStr = JSON.stringify(data);
+                const encodedData = encodeURIComponent(dataStr);
+                
+                // Open the interceptor page with the data
+                const interceptorUrl = 'http://your-interceptor-page-url.html#' + encodedData;
+                
+                // Prompt user
+                if (confirm('API data intercepted! Open in interceptor page?')) {
+                    window.open(interceptorUrl, '_blank');
+                }
+            } catch (e) {
+                console.error('Error intercepting API data:', e);
+            }
+        }
+        
+        return response;
+    };
+    
+    console.log('🔍 Invaluable API Interceptor activated! Monitoring for catResults API calls...');
+})();
+`;
+
+            // Add the interceptor code to the page
+            const interceptorSection = document.createElement('div');
+            interceptorSection.innerHTML = `
+                <h2>Browser Console Code</h2>
+                <p>Copy and paste this code into your browser console while on Invaluable to automatically intercept API calls:</p>
+                <pre id="interceptorCode">${interceptorCode}</pre>
+                <button id="copyInterceptorButton">Copy Code</button>
+            `;
+            document.body.appendChild(interceptorSection);
+
+            // Add copy functionality
+            document.getElementById('copyInterceptorButton').addEventListener('click', function() {
+                const interceptorCodeElement = document.getElementById('interceptorCode');
+                const range = document.createRange();
+                range.selectNode(interceptorCodeElement);
+                window.getSelection().removeAllRanges();
+                window.getSelection().addRange(range);
+                document.execCommand('copy');
+                window.getSelection().removeAllRanges();
+                this.textContent = 'Copied!';
+                setTimeout(() => {
+                    this.textContent = 'Copy Code';
+                }, 2000);
+            });
+        });
+    </script>
+</body>
+</html> 

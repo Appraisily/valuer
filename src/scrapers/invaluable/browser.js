@@ -15,7 +15,9 @@ const browserConfig = {
     '--disable-features=IsolateOrigins,site-per-process',
     '--allow-running-insecure-content',
     '--disable-notifications',
-    '--disable-popup-blocking'
+    '--disable-popup-blocking',
+    '--disable-blink-features=AutomationControlled',
+    '--disable-browser-side-navigation'
   ],
   userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
   headers: {
@@ -58,7 +60,16 @@ class BrowserManager {
           '--enable-javascript',
           '--enable-features=NetworkService,NetworkServiceInProcess',
           '--disable-blink-features=AutomationControlled'
-        ]
+        ],
+        ignoreHTTPSErrors: true,
+        defaultViewport: {
+          width,
+          height,
+          deviceScaleFactor: 1,
+          hasTouch: false,
+          isLandscape: true,
+          isMobile: false
+        }
       });
 
       this.page = await this.browser.newPage();
@@ -177,6 +188,48 @@ class BrowserManager {
       
       // Add random mouse movements and scrolling
       await this.addHumanBehavior(this.page);
+
+      // Add enhanced cloudflare evasion
+      await this.page.evaluateOnNewDocument(() => {
+        // Overwrite navigator properties to appear more human
+        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        
+        // Add fake timezone to match US
+        Object.defineProperty(Intl, 'DateTimeFormat', {
+          get: () => function(...args) {
+            return {
+              resolvedOptions: () => ({
+                locale: 'en-US',
+                timeZone: 'America/New_York'
+              })
+            };
+          }
+        });
+        
+        // Make fingerprinting more consistent
+        const originalGetParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter) {
+          // UNMASKED_VENDOR_WEBGL
+          if (parameter === 37445) {
+            return 'Google Inc. (Intel)';
+          }
+          // UNMASKED_RENDERER_WEBGL
+          if (parameter === 37446) {
+            return 'ANGLE (Intel, Intel(R) UHD Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)';
+          }
+          return originalGetParameter.call(this, parameter);
+        };
+        
+        // Override permissions
+        const originalQuery = Permissions.prototype.query;
+        Permissions.prototype.query = function(parameters) {
+          return Promise.resolve({
+            state: 'granted',
+            onchange: null
+          });
+        };
+      });
     }
   }
 
@@ -230,15 +283,18 @@ class BrowserManager {
     try {
       console.log('Handling protection page...');
       
+      // Improved Cloudflare handling
+      const page = this.getPage();
+      
       // Add random mouse movements
-      await this.page.mouse.move(
+      await page.mouse.move(
         100 + Math.random() * 100,
         100 + Math.random() * 100,
         { steps: 10 }
       );
       
       // Wait a bit and add some scrolling
-      await this.page.evaluate(() => {
+      await page.evaluate(() => {
         window.scrollTo({
           top: 100,
           behavior: 'smooth'
@@ -246,17 +302,24 @@ class BrowserManager {
         return new Promise(r => setTimeout(r, 1000));
       });
       
-      // Wait for protection to clear
-      await this.page.waitForFunction(() => {
-        return !document.querySelector('[id^="px-captcha"]') && 
-               !document.querySelector('.px-block');
-      }, { timeout: 30000 });
+      // Look for Cloudflare specific elements
+      const cloudflareDetected = await page.evaluate(() => {
+        return document.querySelector('#cf-error-details') !== null ||
+               document.querySelector('.cf-error-code') !== null ||
+               document.querySelector('#challenge-running') !== null ||
+               document.querySelector('#challenge-form') !== null;
+      });
       
-      console.log('Protection cleared');
-      return true;
+      if (cloudflareDetected) {
+        console.log('Cloudflare protection detected, trying to bypass...');
+        // Wait for challenge to potentially resolve
+        await page.waitForTimeout(5000);
+      }
+      
+      return !cloudflareDetected;
     } catch (error) {
       console.error('Error handling protection:', error);
-      throw error;
+      return false;
     }
   }
 
