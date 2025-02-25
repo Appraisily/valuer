@@ -40,19 +40,34 @@ function formatCookies(cookies, params = {}) {
       formattedCookies.push({
         name: 'cf_clearance',
         value: params.cf_clearance || 'Yq4QHU.y14z93vU3CmLCK80CU7Pq6pgupmW0eM8k548-1738320515-1.2.1.1-ZFXBFgIPHghfvwwfhRbZx27.6zPihqfQ4vGP0VY1v66mKc.wwAOVRiRJhK6ouVt_.wMB30bkeY0r9NK.KUTU4gu7GzZxbyh0EH_gE36kcnHDvGATrI_vFs9y1XHq3PgtlHmBUflqgjcS6x9MC5YpXoeELPYiT0k59IPMn..1cHED7zV6T78hILKinjM6hZ.ZeQwetIN6SPmuvXb7V2z2ddJa64Vg_zUi.euce0SjjJr5ti7tHWoFsTV1DO1MkFwDfUpy1yTCdESho.EwyRgfdfRAlx6njkTmlWNkp1aXcXU',
-        domain: '.invaluable.com'
+        domain: '.invaluable.com',
+        path: '/'
       });
     }
     if (!hasAZToken) {
       formattedCookies.push({
         name: 'AZTOKEN-PROD',
         value: params.aztoken || '4F562873-F229-4346-A846-37E9A451FA9E',
-        domain: '.invaluable.com'
+        domain: '.invaluable.com',
+        path: '/'
       });
     }
   }
   
-  return formattedCookies;
+  // Sanitizar las cookies para evitar problemas con partitionKey y otras propiedades problemáticas
+  return formattedCookies.map(cookie => {
+    // Crear una nueva cookie con solo las propiedades necesarias
+    return {
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain || '.invaluable.com',
+      path: cookie.path || '/',
+      expires: cookie.expires || -1,
+      httpOnly: !!cookie.httpOnly,
+      secure: !!cookie.secure,
+      session: !!cookie.session
+    };
+  });
 }
 
 /**

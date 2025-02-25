@@ -6,6 +6,33 @@ const { extractMetadata, randomWait, detectCookieChanges } = require('./utils');
 const { constructSearchUrl } = require('./url-builder');
 
 /**
+ * Filtra y limpia las cookies para evitar problemas de serialización
+ * @param {Array} cookies - Array de cookies a limpiar
+ * @returns {Array} - Array de cookies filtradas y seguras
+ */
+function sanitizeCookies(cookies) {
+  if (!cookies || !Array.isArray(cookies)) return [];
+  
+  return cookies.map(cookie => {
+    // Crear una nueva cookie con solo las propiedades necesarias
+    const safeCookie = {
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain || '.invaluable.com',
+      path: cookie.path || '/',
+      expires: cookie.expires || -1,
+      httpOnly: !!cookie.httpOnly,
+      secure: !!cookie.secure,
+      session: !!cookie.session
+    };
+    
+    // Eliminar propiedades que pueden causar problemas
+    // como partitionKey, sameSite, etc.
+    return safeCookie;
+  });
+}
+
+/**
  * Maneja la paginación completa para obtener todos los resultados
  * usando llamadas API directas
  * @param {Object} browser - Instancia del gestor de navegador
@@ -22,13 +49,15 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
   let totalItems = firstPageResults.results?.[0]?.hits?.length || 0;
   let successfulPages = [1]; // La página 1 ya se ha recuperado con éxito
   let failedPages = [];
-  let cookieState = [...initialCookies];
+  
+  // Sanitizar las cookies iniciales para evitar errores
+  let cookieState = sanitizeCookies([...initialCookies]);
   
   console.log('Iniciando paginación por API directa...');
 
   // Si hay cookies actualizadas en la primera página, usarlas
   if (firstPageResults.cookies && firstPageResults.cookies.length > 0) {
-    cookieState = firstPageResults.cookies;
+    cookieState = sanitizeCookies(firstPageResults.cookies);
     console.log(`Se obtuvieron ${cookieState.length} cookies actualizadas de la primera página`);
   }
   
@@ -68,18 +97,14 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
             'Accept': 'application/json',
             'Content-Type': 'application/json',
             'X-Requested-With': 'XMLHttpRequest',
-            'sec-ch-ua': '"Not A;Brand";v="99", "Chromium";v="101", "Google Chrome";v="101"',
-            'sec-ch-ua-mobile': '?0',
-            'sec-ch-ua-platform': '"Windows"',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/101.0.4951.67 Safari/537.36'
           };
           
-          // Añadir cookies al header
+          // Añadir cookies al header en lugar de usar setCookie
           if (cookieState && cookieState.length > 0) {
-            headers['Cookie'] = cookieState.map(c => `${c.name}=${c.value}`).join('; ');
+            const cookieString = cookieState.map(c => `${c.name}=${c.value}`).join('; ');
+            headers['Cookie'] = cookieString;
+            console.log(`Añadiendo ${cookieState.length} cookies a la solicitud`);
           }
           
           request.continue({ headers });
@@ -94,7 +119,8 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
           
           // Añadir cookies a estas solicitudes también
           if (cookieState && cookieState.length > 0) {
-            headers['Cookie'] = cookieState.map(c => `${c.name}=${c.value}`).join('; ');
+            const cookieString = cookieState.map(c => `${c.name}=${c.value}`).join('; ');
+            headers['Cookie'] = cookieString;
           }
           
           request.continue({ headers });
@@ -127,18 +153,10 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
       // Capturar respuestas de session-info para obtener cookies críticas
       if (url.includes('session-info') && response.status() === 200) {
         console.log('Capturada respuesta de session-info');
-        // Actualizar cookies después de esta llamada
-        const updatedCookies = await page.cookies();
-        if (updatedCookies && updatedCookies.length > 0) {
-          cookieState = updatedCookies;
-        }
       }
     });
     
-    // Establecer cookies iniciales
-    if (cookieState && cookieState.length > 0) {
-      await page.setCookie(...cookieState);
-    }
+    // En lugar de setCookie (que causa problemas), ahora usamos headers de Cookie directamente
     
     // 1. Primero establecer el contexto navegando a la URL de búsqueda principal
     const url = constructSearchUrl({...params, page: 1});
@@ -180,10 +198,11 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
       console.error('Error al obtener información de sesión:', error.message);
     }
     
-    // Actualizar cookies después de obtener la info de sesión
+    // Capturar las cookies después de establecer el contexto
     const updatedCookies = await page.cookies();
     if (updatedCookies && updatedCookies.length > 0) {
-      cookieState = updatedCookies;
+      // Sanitizar las cookies para evitar problemas
+      cookieState = sanitizeCookies(updatedCookies);
       console.log(`Cookies actualizadas después de obtener información de sesión: ${cookieState.length} cookies`);
     }
     
@@ -203,7 +222,6 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
         const payload = {
           params: searchParams,
           timestamp: Date.now(),
-          // Añadir un fingerprint único para cada solicitud
           requestId: `req_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
           clientType: 'web'
         };
@@ -211,17 +229,18 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
         console.log(`Enviando solicitud POST a /catResults para página ${pageNum}...`);
         
         // Realizar la solicitud API directamente
-        const endpoint = '/catResults';
-        const results = await page.evaluate(async (endpoint, payload) => {
+        // Pasar las cookies como string en el contexto de la función para evitar problemas de serialización
+        const cookieString = cookieState.map(c => `${c.name}=${c.value}`).join('; ');
+        
+        const results = await page.evaluate(async (endpoint, payload, cookieHeader) => {
           try {
-            console.log(`Fetch a ${endpoint} con datos:`, JSON.stringify(payload).substring(0, 100) + '...');
-            
-            const response = await fetch(endpoint, {
+            const response = await fetch('/catResults', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
-                'X-Requested-With': 'XMLHttpRequest'
+                'X-Requested-With': 'XMLHttpRequest',
+                'Cookie': cookieHeader
               },
               body: JSON.stringify(payload),
               credentials: 'include'
@@ -231,13 +250,12 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
               throw new Error(`Error HTTP: ${response.status}`);
             }
             
-            const data = await response.json();
-            return data;
+            return await response.json();
           } catch (error) {
             console.error('Error en solicitud fetch:', error.message);
             return null;
           }
-        }, endpoint, payload);
+        }, '/catResults', payload, cookieString);
         
         // Verificar resultados (primero de la variable results, luego de lastResponse como respaldo)
         const pageResults = results || lastResponse;
@@ -258,50 +276,93 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
           console.log(`❌ Página ${pageNum}: No se obtuvieron resultados válidos`);
           failedPages.push(pageNum);
           
-          // Verificar si se trata de un problema de autenticación/sesión
+          // Reintentar con un enfoque alternativo
           if (pageNum === 2 && failedPages.length === 1) {
-            console.log('⚠️ Detectado posible problema de sesión en la primera página adicional');
-            console.log('Intentando restablecer la sesión antes de continuar...');
+            console.log('⚠️ Probando enfoque alternativo para paginación...');
             
-            // Navegar nuevamente a la página principal y esperar a que se cargue completamente
-            await page.goto(url, { waitUntil: 'networkidle2' });
-            await browser.handleProtection();
-            await randomWait(3000, 6000);
+            // Usar un enfoque diferente con solicitudes GET
+            console.log('Intentando acceder a la página a través de URL...');
+            const pageUrl = constructSearchUrl({...params, page: pageNum});
             
-            // Intentar obtener información de sesión de nuevo
             try {
-              await page.evaluate(async () => {
-                await fetch('/boulder/session-info', {
-                  method: 'GET',
-                  credentials: 'include'
-                });
+              // Navegar directamente a la URL de la página
+              await page.goto(pageUrl, { waitUntil: 'networkidle2' });
+              
+              // Esperar para dar tiempo a que cargue la página
+              await randomWait(2000, 3000);
+              
+              // Intentar extraer los resultados del DOM o buscar la respuesta de la API
+              const alternativeResults = await page.evaluate(async () => {
+                // Intentar buscar la variable de datos en el DOM
+                const scripts = document.querySelectorAll('script');
+                for (let script of scripts) {
+                  const content = script.textContent || '';
+                  if (content.includes('window.__INITIAL_STATE__')) {
+                    try {
+                      // Extraer los datos del estado inicial
+                      const match = content.match(/window\.__INITIAL_STATE__\s*=\s*({.*});/);
+                      if (match && match[1]) {
+                        const state = JSON.parse(match[1]);
+                        return state.search || state.pageData || state;
+                      }
+                    } catch (e) {
+                      console.error('Error al parsear estado:', e);
+                    }
+                  }
+                }
+                return null;
               });
               
-              // Actualizar cookies después de restablecer la sesión
-              const refreshedCookies = await page.cookies();
-              if (refreshedCookies && refreshedCookies.length > 0) {
-                cookieState = refreshedCookies;
-                console.log('Cookies actualizadas después de restablecer sesión');
+              if (alternativeResults && (alternativeResults.lots || alternativeResults.results)) {
+                // Convertir al formato esperado
+                console.log('✅ Enfoque alternativo exitoso: Datos extraídos de la página');
+                
+                // Determinar la fuente y formato de los datos
+                const items = alternativeResults.lots || 
+                             (alternativeResults.results && alternativeResults.results[0] && 
+                             alternativeResults.results[0].hits) || [];
+                
+                // Añadir los resultados al acumulado
+                if (items.length > 0) {
+                  console.log(`Recuperados ${items.length} resultados`);
+                  
+                  if (!allResults.results[0].hits) {
+                    allResults.results[0].hits = [];
+                  }
+                  
+                  allResults.results[0].hits = [
+                    ...allResults.results[0].hits,
+                    ...items
+                  ];
+                  
+                  totalItems += items.length;
+                  successfulPages.push(pageNum);
+                  failedPages.pop(); // Quitar esta página de las fallidas
+                }
               }
-              
-              // Reintentamos la misma página
-              pageNum--; // Para que el ciclo intente la misma página de nuevo
-              continue;
             } catch (error) {
-              console.error('Error al restablecer sesión:', error.message);
+              console.error('Error en enfoque alternativo:', error.message);
             }
           }
         }
         
         // Actualizar cookies después de cada solicitud exitosa
         if (successfulPages.includes(pageNum)) {
-          const currentCookies = await page.cookies();
-          if (currentCookies && currentCookies.length > 0) {
-            const cookiesChanged = detectCookieChanges(cookieState, currentCookies);
-            if (cookiesChanged) {
-              cookieState = currentCookies;
-              console.log(`Cookies actualizadas después de la página ${pageNum}`);
+          try {
+            const currentCookies = await page.cookies();
+            if (currentCookies && currentCookies.length > 0) {
+              // Sanitizar las cookies antes de usarlas
+              const newCookieState = sanitizeCookies(currentCookies);
+              
+              const cookiesChanged = detectCookieChanges(cookieState, newCookieState);
+              if (cookiesChanged) {
+                cookieState = newCookieState;
+                console.log(`Cookies actualizadas después de la página ${pageNum} (${cookieState.length} cookies)`);
+              }
             }
+          } catch (error) {
+            console.error(`Error al actualizar cookies: ${error.message}`);
+            // Continuar con las cookies actuales
           }
         }
         
