@@ -283,42 +283,84 @@ class BrowserManager {
     try {
       console.log('Handling protection page...');
       
-      // Improved Cloudflare handling
+      // Mejorado el manejo de Cloudflare
       const page = this.getPage();
       
-      // Add random mouse movements
-      await page.mouse.move(
-        100 + Math.random() * 100,
-        100 + Math.random() * 100,
-        { steps: 10 }
-      );
-      
-      // Wait a bit and add some scrolling
-      await page.evaluate(() => {
-        window.scrollTo({
-          top: 100,
-          behavior: 'smooth'
-        });
-        return new Promise(r => setTimeout(r, 1000));
-      });
-      
-      // Look for Cloudflare specific elements
+      // Detectar si estamos en una página de protección de Cloudflare
       const cloudflareDetected = await page.evaluate(() => {
         return document.querySelector('#cf-error-details') !== null ||
                document.querySelector('.cf-error-code') !== null ||
                document.querySelector('#challenge-running') !== null ||
-               document.querySelector('#challenge-form') !== null;
+               document.querySelector('#challenge-form') !== null ||
+               document.querySelector('title')?.innerText.includes('Attention Required') ||
+               document.querySelector('title')?.innerText.includes('Cloudflare') ||
+               document.body?.innerText.includes('checking your browser') ||
+               document.body?.innerText.includes('Please turn JavaScript on');
       });
       
-      if (cloudflareDetected) {
-        console.log('Cloudflare protection detected, trying to bypass...');
-        // Wait for challenge to potentially resolve
-        await page.waitForTimeout(5000);
+      if (!cloudflareDetected) {
+        console.log('No se detectó página de protección de Cloudflare, continuando normalmente.');
+        return true;
       }
       
-      return !cloudflareDetected;
+      console.log('Detectada protección de Cloudflare, intentando bypass...');
+      
+      // Comportamiento más humano
+      // Añadir movimientos aleatorios del ratón
+      for (let i = 0; i < 5; i++) {
+        await page.mouse.move(
+          100 + Math.random() * 500,
+          100 + Math.random() * 300,
+          { steps: 25 }
+        );
+        await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
+      }
+      
+      // Simular scrolling como un humano
+      await page.evaluate(() => {
+        return new Promise((resolve) => {
+          let totalHeight = 0;
+          const distance = 100;
+          const timer = setInterval(() => {
+            window.scrollBy(0, distance);
+            totalHeight += distance;
+            
+            if (totalHeight >= 1000) {
+              clearInterval(timer);
+              setTimeout(resolve, 1000);
+            }
+          }, 100);
+        });
+      });
+      
+      // Esperar a que el desafío se resuelva potencialmente
+      console.log('Esperando a que se resuelva el desafío de Cloudflare...');
+      await page.waitForTimeout(10000);
+      
+      // Verificar si el desafío se ha resuelto
+      const challengeResolved = await page.evaluate(() => {
+        return document.querySelector('#challenge-running') === null &&
+               document.querySelector('#challenge-form') === null &&
+               !document.body?.innerText.includes('checking your browser');
+      });
+      
+      if (challengeResolved) {
+        console.log('¡Desafío de Cloudflare resuelto! Continuando...');
+        
+        // Extraer y guardar las cookies de Cloudflare para uso futuro
+        const cookies = await page.cookies();
+        const cfClearance = cookies.find(c => c.name === 'cf_clearance');
+        if (cfClearance) {
+          console.log('Cookie cf_clearance encontrada:', cfClearance.value);
+        }
+        
+        return true;
+      } else {
+        console.log('No se pudo resolver el desafío de Cloudflare automáticamente.');
+        return false;
+      }
     } catch (error) {
-      console.error('Error handling protection:', error);
+      console.error('Error al manejar la protección:', error);
       return false;
     }
   }
