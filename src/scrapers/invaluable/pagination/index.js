@@ -123,10 +123,15 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
     
     // Extraer refId y searchContext del estado inicial si es necesario
     if (!navState.refId || !navState.searchContext) {
-      const initialStateParams = await extractFromInitialState(page);
-      if (initialStateParams.refId) navState.refId = initialStateParams.refId;
-      if (initialStateParams.searchContext) navState.searchContext = initialStateParams.searchContext;
-      if (initialStateParams.searcher) navState.searcher = initialStateParams.searcher;
+      try {
+        console.log('Intentando extraer parámetros del estado inicial de la aplicación...');
+        const initialStateParams = await extractFromInitialState(page);
+        if (initialStateParams.refId) navState.refId = initialStateParams.refId;
+        if (initialStateParams.searchContext) navState.searchContext = initialStateParams.searchContext;
+        if (initialStateParams.searcher) navState.searcher = initialStateParams.searcher;
+      } catch (error) {
+        console.warn(`⚠️ No se pudieron extraer parámetros del estado inicial: ${error.message}`);
+      }
     }
     
     // Configurar interceptación de solicitudes
@@ -149,23 +154,69 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
         if (failedPages.has(pageNum)) {
           const waitTime = 2000 + (failedPages.size * 500);
           console.log(`Reintentando página ${pageNum} después de ${waitTime}ms`);
-          await wait(page, waitTime);
+          
+          // Usar try/catch específico para esperas por si hay problemas con wait
+          try {
+            await wait(page, waitTime);
+          } catch (waitError) {
+            console.warn(`⚠️ Error al esperar, continuando de todos modos: ${waitError.message}`);
+          }
         }
         
         // Solicitar info de sesión para mantener cookies frescas
-        const sessionInfoResponse = await requestSessionInfo(page, navState);
-        if (sessionInfoResponse) {
-          console.log('Información de sesión actualizada correctamente');
+        try {
+          console.log('Solicitando información de sesión...');
+          const sessionInfoResponse = await requestSessionInfo(page, navState);
+          if (sessionInfoResponse) {
+            console.log('Información de sesión actualizada correctamente');
+          }
+        } catch (sessionError) {
+          console.warn(`⚠️ Error al obtener información de sesión: ${sessionError.message}`);
+          // Continuamos a pesar del error
         }
         
         // Esperar un poco entre solicitudes para evitar detección
-        await wait(page, 500 + Math.random() * 500);
+        try {
+          await wait(page, 500 + Math.random() * 500);
+        } catch (waitError) {
+          console.warn(`⚠️ Error al esperar entre solicitudes: ${waitError.message}`);
+          // Continuamos a pesar del error
+        }
         
         // Solicitar resultados de la página actual
         const pageResults = await requestPageResults(page, pageNum, params, navState);
         
+        // Si no obtuvimos resultados, intentar con un enfoque alternativo
+        if (!pageResults || !pageResults.results || !pageResults.results[0]?.hits) {
+          console.warn(`⚠️ No se obtuvieron resultados para la página ${pageNum}, intentando enfoque alternativo...`);
+          
+          // Esperar un poco antes de intentar de nuevo
+          try {
+            await wait(page, 1000);
+          } catch (waitError) {}
+          
+          // Intento alternativo: si no pudimos obtener resultados, intentar con un método más directo
+          try {
+            console.log('Intentando obtener resultados con método alternativo...');
+            // Modificar los parámetros para intentar un enfoque diferente
+            const altParams = { ...params, requestType: 'direct', start: (pageNum - 1) * 96, size: 96 };
+            const altResults = await requestPageResults(page, pageNum, altParams, navState);
+            
+            if (altResults && altResults.results && altResults.results[0]?.hits) {
+              console.log('✅ Obtenidos resultados con método alternativo');
+              pageResults = altResults;
+            }
+          } catch (altError) {
+            console.warn(`⚠️ También falló el método alternativo: ${altError.message}`);
+          }
+        }
+        
         // Actualizar cookies después de la solicitud
-        navState.cookies = await updateCookiesAfterRequest(page, navState.cookies, pageNum);
+        try {
+          navState.cookies = await updateCookiesAfterRequest(page, navState.cookies, pageNum);
+        } catch (cookieError) {
+          console.warn(`⚠️ Error al actualizar cookies: ${cookieError.message}`);
+        }
         
         // Procesar resultados obtenidos
         // Adaptado para la estructura específica de Invaluable
@@ -219,10 +270,26 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
         }
       } catch (error) {
         console.error(`❌ Error en la página ${pageNum}: ${error.message}`);
+        
+        // Mejor diagnóstico para errores específicos
+        if (error.message.includes('waitForTimeout')) {
+          console.log('🔍 Detectado error de waitForTimeout. Esto sugiere un problema con Puppeteer o el navegador.');
+          console.log('   Continuando con la siguiente página sin esperar...');
+        } else if (error.message.includes('Navigation timeout')) {
+          console.log('🔍 Detectado timeout de navegación. La página podría estar bloqueada por Cloudflare.');
+        } else if (error.message.includes('Session closed')) {
+          console.log('🔍 Sesión cerrada. El navegador podría haberse cerrado inesperadamente.');
+          break; // Terminamos el bucle de paginación
+        }
+        
         failedPages.add(pageNum);
         
         // Esperar un poco más en caso de error
-        await wait(page, 2000);
+        try {
+          await wait(page, 2000);
+        } catch (waitError) {
+          // Ignorar errores de espera
+        }
       }
     }
   } catch (error) {

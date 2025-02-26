@@ -35,71 +35,129 @@ function inspectResponse(obj, path = '', foundKeys = []) {
 }
 
 /**
- * Extrae parámetros de navegación (refId, searchContext, searcher) de los resultados de la primera página
- * @param {Object} firstPageResults - Resultados de la primera página
- * @returns {Object} - Parámetros de navegación extraídos
+ * Extrae parámetros de navegación de los resultados de la primera página
+ * @param {Object} results - Resultados de la primera página
+ * @returns {Object} - Parámetros de navegación
  */
-function extractNavigationParams(firstPageResults) {
-  console.log('Extrayendo parámetros de navegación de los resultados de la primera página');
+function extractNavigationParams(results) {
+  if (!results) return { refId: null, searchContext: null, searcher: null };
   
-  let refId = null;
-  let searchContext = null;
-  let searcher = null;
+  // Debug para identificar dónde podría estar el refId
+  console.log('Claves importantes encontradas en firstPageResults:', 
+    Object.keys(results).filter(k => 
+      typeof results[k] === 'string' && 
+      ['id', 'ref', 'refId', 'requestId'].some(key => k.toLowerCase().includes(key))
+    ).map(k => ({ key: k, value: results[k] }))
+  );
   
-  // Intentar extraer directamente de firstPageResults
-  if (firstPageResults) {
-    // Registrar información de depuración para ver la estructura completa
-    const foundKeys = inspectResponse(firstPageResults);
-    console.log('Claves importantes encontradas en firstPageResults:', foundKeys);
-
-    // Verificar directamente en el objeto raíz
-    if (firstPageResults.refId) {
-      refId = firstPageResults.refId;
-      console.log(`✅ refId encontrado directamente en firstPageResults: ${refId}`);
-    } else if (firstPageResults.pagination && firstPageResults.pagination.refId) {
-      refId = firstPageResults.pagination.refId;
-      console.log(`✅ refId encontrado en firstPageResults.pagination: ${refId}`);
-    } else if (firstPageResults.searcherInfo && firstPageResults.searcherInfo.refId) {
-      refId = firstPageResults.searcherInfo.refId;
-      console.log(`✅ refId encontrado en firstPageResults.searcherInfo: ${refId}`);
+  // Verificar si tiene refId directo en la raíz
+  if (results.refId) {
+    console.log(`✅ Encontrado refId directo: ${results.refId}`);
+    return { 
+      refId: results.refId,
+      searchContext: results.searchContext || null,
+      searcher: results.searcher || null
+    };
+  }
+  
+  // Verificar si hay un ID en el requestParameters
+  if (results.requestParameters) {
+    const requestParams = results.requestParameters;
+    
+    // Debug de los parámetros de solicitud
+    console.log('Parámetros de solicitud disponibles:', 
+      Object.keys(requestParams).filter(k => 
+        typeof requestParams[k] === 'string' && 
+        ['id', 'ref', 'refId', 'requestId'].some(key => k.toLowerCase().includes(key))
+      ).map(k => ({ key: k, value: requestParams[k] }))
+    );
+    
+    if (requestParams.refId) {
+      console.log(`✅ Encontrado refId en requestParameters: ${requestParams.refId}`);
+      return {
+        refId: requestParams.refId,
+        searchContext: requestParams.searchContext || null,
+        searcher: requestParams.searcher || null
+      };
     }
     
-    // Verificar en la estructura anidada results[0]
-    if (!refId && firstPageResults.results && firstPageResults.results[0]) {
-      const firstResult = firstPageResults.results[0];
-      
-      if (firstResult.refId) {
-        refId = firstResult.refId;
-        console.log(`✅ refId encontrado en firstPageResults.results[0]: ${refId}`);
-      } else if (firstResult.pagination && firstResult.pagination.refId) {
-        refId = firstResult.pagination.refId;
-        console.log(`✅ refId encontrado en firstPageResults.results[0].pagination: ${refId}`);
-      } else if (firstResult.searcherInfo && firstResult.searcherInfo.refId) {
-        refId = firstResult.searcherInfo.refId;
-        console.log(`✅ refId encontrado en firstPageResults.results[0].searcherInfo: ${refId}`);
-      }
-    }
-
-    // Extraer searchContext (primero del objeto raíz, luego de results[0])
-    if (firstPageResults.searchContext) {
-      searchContext = firstPageResults.searchContext;
-      console.log(`✅ searchContext encontrado: ${searchContext}`);
-    } else if (firstPageResults.results && firstPageResults.results[0] && firstPageResults.results[0].searchContext) {
-      searchContext = firstPageResults.results[0].searchContext;
-      console.log(`✅ searchContext encontrado en results[0]: ${searchContext}`);
-    }
-
-    // Extraer searcher (primero del objeto raíz, luego de results[0])
-    if (firstPageResults.searcher) {
-      searcher = firstPageResults.searcher;
-      console.log(`✅ searcher encontrado: ${searcher}`);
-    } else if (firstPageResults.results && firstPageResults.results[0] && firstPageResults.results[0].searcher) {
-      searcher = firstPageResults.results[0].searcher;
-      console.log(`✅ searcher encontrado en results[0]: ${searcher}`);
+    if (requestParams.requestId) {
+      console.log(`ℹ️ Usando requestId como refId: ${requestParams.requestId}`);
+      return {
+        refId: requestParams.requestId,
+        searchContext: requestParams.searchContext || null,
+        searcher: requestParams.searcher || null
+      };
     }
   }
   
-  return { refId, searchContext, searcher };
+  // Buscar en results.results[0].meta
+  if (results.results && results.results[0] && results.results[0].meta) {
+    const meta = results.results[0].meta;
+    
+    // Debug de campos en meta
+    console.log('Campos meta disponibles:', 
+      Object.keys(meta).filter(k => 
+        typeof meta[k] === 'string' && 
+        ['id', 'ref', 'refId', 'requestId', 'sequence'].some(key => k.toLowerCase().includes(key))
+      ).map(k => ({ key: k, value: meta[k] }))
+    );
+    
+    if (meta.refId) {
+      console.log(`✅ Encontrado refId en meta: ${meta.refId}`);
+      return {
+        refId: meta.refId,
+        searchContext: meta.searchContext || results.searchContext || null,
+        searcher: meta.searcher || results.searcher || null
+      };
+    }
+    
+    if (meta.requestId) {
+      console.log(`ℹ️ Usando requestId de meta como refId: ${meta.requestId}`);
+      return {
+        refId: meta.requestId,
+        searchContext: meta.searchContext || results.searchContext || null,
+        searcher: meta.searcher || results.searcher || null
+      };
+    }
+  }
+  
+  // Buscar en propiedades anidadas recursivamente
+  const refIdFromNested = findValueInObject(results, 'refId');
+  if (refIdFromNested) {
+    console.log(`✅ Encontrado refId anidado: ${refIdFromNested}`);
+    return {
+      refId: refIdFromNested,
+      searchContext: findValueInObject(results, 'searchContext'),
+      searcher: findValueInObject(results, 'searcher')
+    };
+  }
+  
+  console.log('⚠️ No se encontró refId en la respuesta, la paginación podría no funcionar correctamente');
+  return { refId: null, searchContext: null, searcher: null };
+}
+
+/**
+ * Busca un valor en un objeto anidado
+ * @param {Object} obj - Objeto en el que buscar
+ * @param {string} key - Clave a buscar
+ * @returns {*} - Valor encontrado o null
+ */
+function findValueInObject(obj, key) {
+  if (!obj || typeof obj !== 'object') return null;
+  
+  // Si la clave existe directamente, devolverla
+  if (obj[key] !== undefined) return obj[key];
+  
+  // Buscar en propiedades anidadas
+  for (const prop in obj) {
+    if (typeof obj[prop] === 'object') {
+      const result = findValueInObject(obj[prop], key);
+      if (result !== null) return result;
+    }
+  }
+  
+  return null;
 }
 
 /**

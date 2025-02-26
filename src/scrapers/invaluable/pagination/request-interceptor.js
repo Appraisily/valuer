@@ -184,6 +184,22 @@ function buildResultsPayload(params, pageNum, navState) {
     console.log(`Usando refId para página ${pageNum}: ${navState.refId}`);
   } else {
     console.log(`Sin refId disponible, usando sequence: ${pageNum}`);
+    
+    // Intentamos usar una estrategia alternativa más robusta para la paginación
+    // Incluir campos que podrían ayudar a la API a mantener contexto
+    
+    // Alternativa 1: Usar un ID persistente basado en la consulta
+    const queryHash = generateQueryHash(params);
+    payload.queryId = queryHash;
+    
+    // Alternativa 2: Añadir información de paginación más explícita
+    payload.start = (pageNum - 1) * (params.pageSize || 96);
+    payload.size = params.pageSize || 96;
+    
+    // Alternativa 3: Agregar información de orden para mantener consistencia
+    payload.sort = params.sort || 'LowestPriceAsc';
+    
+    console.log(`Usando estrategia alternativa de paginación con queryId: ${queryHash}`);
   }
   
   // Añadir searchContext si está disponible
@@ -215,6 +231,35 @@ function buildResultsPayload(params, pageNum, navState) {
   payload.requestId = `req_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   
   return payload;
+}
+
+/**
+ * Genera un hash consistente basado en los parámetros de consulta
+ * Útil para mantener identificación consistente para la misma consulta
+ * @param {Object} params - Parámetros de búsqueda
+ * @returns {string} - Hash de consulta
+ */
+function generateQueryHash(params) {
+  // Crear una cadena ordenada con los parámetros clave
+  const keyParams = [
+    params.query || '',
+    params.keyword || '',
+    params.priceResult?.min || '',
+    params.priceResult?.max || '',
+    params.sort || '',
+    params.categories || ''
+  ].join('_');
+  
+  // Crear un hash simple
+  let hash = 0;
+  for (let i = 0; i < keyParams.length; i++) {
+    hash = ((hash << 5) - hash) + keyParams.charCodeAt(i);
+    hash |= 0; // Convertir a entero de 32 bits
+  }
+  
+  // Convertir a string positivo y añadir timestamp del día (para que sea consistente durante una sesión)
+  const dayTimestamp = Math.floor(Date.now() / (1000 * 60 * 60 * 24));
+  return `q${Math.abs(hash)}_${dayTimestamp}`;
 }
 
 module.exports = {
