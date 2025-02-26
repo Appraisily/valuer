@@ -198,3 +198,112 @@ The system handles various error scenarios:
 ## License
 
 MIT License
+
+# Enhanced Invaluable Scraper
+
+An improved scraper for Invaluable with features for reliable large-scale data collection.
+
+## Features
+
+- **Resumable Pagination**: Can stop and resume scraping at any point
+- **Progress Tracking**: Detailed statistics and checkpoints
+- **Adaptive Rate Limiting**: Smart delays to avoid detection
+- **Fault Tolerance**: Auto-retry with exponential backoff
+- **Google Cloud Storage Integration**: Store results directly to GCS
+
+## Storage Structure
+
+```
+gs://invaluable-data/
+  └── raw/
+      └── [category]/
+          ├── metadata.json       # Collection info, statistics
+          ├── page_001-100.json   # Batched page results
+          ├── page_101-200.json   # Batched page results
+          └── ...
+```
+
+## Installation
+
+1. Clone the repository
+2. Install dependencies:
+
+```bash
+npm install
+```
+
+3. Set up Google Cloud credentials:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account-file.json"
+```
+
+### Using Existing Service Account Credentials
+
+If you're already using a Google Cloud service account in your application, you can use the same credentials for the scraper:
+
+1. **Using Application Default Credentials**: If your application is already authenticated (running on GCP or using ADC), the scraper will automatically use these credentials.
+
+2. **Using an Existing Service Account**: Modify the configuration to include your credentials:
+
+```javascript
+// In your configuration:
+const CONFIG = {
+  // ...other settings
+  gcsEnabled: true,
+  gcsBucket: 'your-bucket-name',
+  gcsCredentials: require('./path/to/service-account.json') // Or pass credentials object directly
+};
+```
+
+## Configuration
+
+Edit `src/examples/invaluable-category-scraper.js` to customize:
+
+- Category to scrape
+- Maximum pages
+- Batch size
+- Rate limiting parameters
+- Google Cloud Storage settings
+
+## Usage
+
+Run the example scraper:
+
+```bash
+npm start
+```
+
+Or use the pagination manager in your own code:
+
+```javascript
+const PaginationManager = require('./src/scrapers/invaluable/pagination/pagination-manager');
+
+// Initialize the pagination manager
+const paginationManager = new PaginationManager({
+  category: 'furniture',
+  maxPages: 4000,
+  gcsEnabled: true,
+  gcsBucket: 'invaluable-data',
+  batchSize: 100,
+});
+
+// Use it in your scraper
+const results = await paginationManager.processPagination(
+  browser,
+  searchParams,
+  firstPageResults,
+  initialCookies
+);
+```
+
+## Key Components
+
+- **PaginationManager**: Handles resumable pagination, checkpoints, and rate limiting
+- **StorageManager**: Manages saving data to Google Cloud Storage
+
+## Troubleshooting
+
+- **Rate limiting issues**: Try increasing the `baseDelay` and `maxDelay` parameters
+- **Connection errors**: The scraper has built-in retry logic, but persistent issues may require proxy rotation
+- **GCS permissions**: Ensure your service account has proper permissions for the bucket
