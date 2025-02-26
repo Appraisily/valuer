@@ -1,29 +1,52 @@
 FROM node:18-slim
 
-# Install Chrome dependencies
+# Configurar variables de entorno para reducir el tamaño de la instalación de Puppeteer
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome \
+    NODE_ENV=production
+
+# Instalar Chrome y otras dependencias necesarias
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     ca-certificates \
     procps \
+    fonts-liberation \
+    dbus \
+    xdg-utils \
+    libxss1 \
+    libnss3 \
+    libatk-bridge2.0-0 \
+    libgtk-3-0 \
+    libgbm1 \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
     && apt-get update \
     && apt-get install -y google-chrome-stable \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /tmp/chrome-user-data
 
-# Create app directory
+# Crear directorio de la aplicación
 WORKDIR /usr/src/app
 
-# Install app dependencies
+# Copiar solo los archivos de definición de dependencias primero
 COPY package*.json ./
-RUN npm install
 
-# Bundle app source
+# Instalar dependencias de producción solamente con un timeout extendido
+RUN npm install --only=production --no-optional --loglevel error --fetch-timeout=600000
+
+# Copiar el resto del código fuente
 COPY . .
 
-# Expose port
-EXPOSE 3000
+# Crear directorios necesarios
+RUN mkdir -p temp/chrome-data temp/checkpoints
 
-# Start the application
-CMD [ "npm", "start" ]
+# Exponer el puerto que usa el servidor HTTP
+EXPOSE 8080
+
+# Configuración para entorno de contenedor
+ENV PORT=8080 \
+    NODE_ENV=production
+
+# Comando para iniciar la aplicación
+CMD [ "node", "src/examples/invaluable-category-scraper.js" ]

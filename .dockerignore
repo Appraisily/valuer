@@ -1,5 +1,6 @@
 # Dependency directories
 node_modules/
+npm-debug.log
 
 # Environment variables
 .env
@@ -8,6 +9,7 @@ node_modules/
 # Git files
 .git
 .gitignore
+.github
 
 # Docker files
 Dockerfile
@@ -23,3 +25,37 @@ npm-debug.log*
 .vscode
 *.swp
 *.swo
+
+# Test files
+__tests__
+test
+tests
+*.test.js
+*.spec.js
+
+# Temporary files
+tmp
+temp
+*.tmp
+*~
+
+# Build output
+build
+dist
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Debug and development files
+*.map
+*.orig
+.DS_Store
+
+# Large binary files
+*.gz
+*.zip
+*.rar
+*.7z
+*.iso
