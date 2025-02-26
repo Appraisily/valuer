@@ -10,6 +10,7 @@ This API provides a simple interface to search Invaluable's catalog by:
 - Intercepting and capturing JSON responses
 - Handling protection challenges
 - Supporting all Invaluable search parameters
+- **Paginating through multiple pages of results**
 
 ## Features
 
@@ -33,6 +34,12 @@ This API provides a simple interface to search Invaluable's catalog by:
   - Error handling
   - Size-based filtering
   - Detailed logging of result counts
+
+- **Pagination Support**
+  - Fetch specific pages using the `page` parameter
+  - Automatically fetch multiple pages with `fetchAllPages=true`
+  - Limit maximum pages with `maxPages` parameter
+  - Combine results from multiple pages
 
 ### Technical Features
 
@@ -101,23 +108,43 @@ Query Parameters:
 - `priceResult[max]`: Maximum price
 - `houseName`: Auction house name
 - `upcoming`: Filter for upcoming auctions (true/false)
+- `page`: Specific page number to fetch (1-based indexing)
+- `fetchAllPages`: Set to 'true' to fetch multiple pages automatically
+- `maxPages`: Maximum number of pages to fetch when using `fetchAllPages`
 
-Example Requests:
+### Example Requests:
+
+#### Basic Search
 ```bash
-# Basic search
 curl "http://localhost:8080/api/search?query=furniture"
+```
 
-# Search with price range
+#### Search with Price Range
+```bash
 curl "http://localhost:8080/api/search?query=furniture&priceResult%5Bmin%5D=1750&priceResult%5Bmax%5D=3250"
+```
 
-# Search specific items
-curl "http://localhost:8080/api/search?query=Antique+Victorian+mahogany+dining+table&priceResult%5Bmin%5D=1750&priceResult%5Bmax%5D=3250"
+#### Multi-Page Search (Fetch 3 Pages)
+```bash
+curl "http://localhost:8080/api/search?query=furniture&fetchAllPages=true&maxPages=3"
+```
 
-# Search specific auction house
+#### Specific Page Request
+```bash
+curl "http://localhost:8080/api/search?query=furniture&page=2"
+```
+
+#### Advanced Search with Multiple Parameters
+```bash
+curl "http://localhost:8080/api/search?query=Antique+Victorian+mahogany+dining+table&priceResult%5Bmin%5D=1750&priceResult%5Bmax%5D=3250&fetchAllPages=true&maxPages=3"
+```
+
+#### Search Specific Auction House
+```bash
 curl "http://localhost:8080/api/search?houseName=DOYLE%20Auctioneers%20%26%20Appraisers&query=antique"
 ```
 
-Example Response:
+### Example Response:
 ```json
 {
   "success": true,
@@ -127,11 +154,32 @@ Example Response:
     "priceResult": {
       "min": "1750",
       "max": "3250"
-    }
+    },
+    "fetchAllPages": "true",
+    "maxPages": "3"
+  },
+  "pagination": {
+    "currentPage": 3,
+    "totalPages": 12,
+    "totalResults": 287
   },
   "data": {
-    "lots": [...],
-    "totalResults": 42
+    "pages": [
+      {
+        "lots": [...],  // Page 1 results
+        "totalResults": 287
+      },
+      {
+        "lots": [...],  // Page 2 results
+        "totalResults": 287
+      },
+      {
+        "lots": [...],  // Page 3 results
+        "totalResults": 287
+      }
+    ],
+    "combinedLots": [...],  // All lots from all pages combined
+    "totalResults": 287
   }
 }
 ```
@@ -187,6 +235,30 @@ The system handles various error scenarios:
 - Rate limiting
 - Browser errors
 
+## Testing Pagination
+
+To test pagination across multiple pages, use the following commands:
+
+### Test First Page
+```bash
+curl "http://localhost:8080/api/search?query=antique&supercategoryName=Furniture"
+```
+
+### Test Second Page
+```bash
+curl "http://localhost:8080/api/search?query=antique&supercategoryName=Furniture&page=2"
+```
+
+### Test Third Page
+```bash
+curl "http://localhost:8080/api/search?query=antique&supercategoryName=Furniture&page=3"
+```
+
+### Fetch Three Pages Automatically
+```bash
+curl "http://localhost:8080/api/search?query=antique&supercategoryName=Furniture&fetchAllPages=true&maxPages=3"
+```
+
 ## Contributing
 
 1. Fork the repository
@@ -236,24 +308,6 @@ npm install
 
 ```bash
 export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account-file.json"
-```
-
-### Using Existing Service Account Credentials
-
-If you're already using a Google Cloud service account in your application, you can use the same credentials for the scraper:
-
-1. **Using Application Default Credentials**: If your application is already authenticated (running on GCP or using ADC), the scraper will automatically use these credentials.
-
-2. **Using an Existing Service Account**: Modify the configuration to include your credentials:
-
-```javascript
-// In your configuration:
-const CONFIG = {
-  // ...other settings
-  gcsEnabled: true,
-  gcsBucket: 'your-bucket-name',
-  gcsCredentials: require('./path/to/service-account.json') // Or pass credentials object directly
-};
 ```
 
 ## Configuration

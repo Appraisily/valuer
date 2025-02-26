@@ -3,6 +3,56 @@
  */
 
 /**
+ * Construye los parámetros de búsqueda para Invaluable
+ * @param {Object} options - Opciones de búsqueda
+ * @returns {Object} Parámetros formateados para la búsqueda
+ */
+function buildSearchParams(options = {}) {
+  // Parámetros base
+  const params = {
+    query: options.query || '',
+    keyword: options.keyword || '',
+    page: options.page || 1,
+  };
+
+  // Añadir categoría si se proporciona
+  if (options.category) {
+    params.supercategoryName = options.category.charAt(0).toUpperCase() + options.category.slice(1);
+  }
+
+  // Añadir subcategoría si se proporciona
+  if (options.subcategory) {
+    params.categoryName = options.subcategory;
+  }
+
+  // Añadir casa de subastas si se proporciona
+  if (options.houseName) {
+    params.houseName = options.houseName;
+  }
+
+  // Añadir rango de precios si se proporciona
+  if (options.minPrice) {
+    params['priceResult[min]'] = options.minPrice;
+  }
+  if (options.maxPrice) {
+    params['priceResult[max]'] = options.maxPrice;
+  }
+
+  // Añadir ordenamiento si se proporciona
+  if (options.sortBy) {
+    params.sortBy = options.sortBy;
+  }
+
+  // Añadir filtro de subastas próximas si se proporciona
+  if (options.upcoming !== undefined) {
+    params.upcoming = options.upcoming ? 'true' : 'false';
+  }
+
+  console.log('Parámetros de búsqueda construidos:', params);
+  return params;
+}
+
+/**
  * Valida y formatea las cookies para que estén listas para usar
  * @param {Array|string} cookies - Cookies en formato array u objeto JSON
  * @param {Object} params - Parámetros que pueden contener valores por defecto
@@ -162,6 +212,7 @@ function detectCookieChanges(oldCookies, newCookies) {
 
 // Exportamos las funciones de utilidad
 module.exports = {
+  buildSearchParams,
   formatCookies,
   extractMetadata,
   randomWait,

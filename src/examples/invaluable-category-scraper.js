@@ -53,7 +53,7 @@ async function scrapeCategory() {
   });
   
   try {
-    await browser.init();
+    await browser.initialize();
     console.log('Browser initialized');
     
     // Build search parameters for the category

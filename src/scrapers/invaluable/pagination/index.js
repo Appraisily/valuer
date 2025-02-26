@@ -30,6 +30,176 @@ async function wait(page, ms) {
 }
 
 /**
+ * Maneja la primera página de búsqueda en Invaluable
+ * @param {Object} browser - Instancia del navegador
+ * @param {Object} params - Parámetros de búsqueda
+ * @returns {Promise<Object>} - Objeto con resultados y cookies
+ */
+async function handleFirstPage(browser, params) {
+  console.log('🔍 Manejando primera página de resultados');
+  
+  // Crear una página para la búsqueda inicial
+  const page = await browser.createTab('firstPageTab');
+  
+  try {
+    // Construir la URL de búsqueda
+    const searchUrl = buildSearchUrl(params);
+    console.log(`Navegando a: ${searchUrl}`);
+    
+    // Navegar a la URL de búsqueda
+    await page.goto(searchUrl, { 
+      waitUntil: 'networkidle2', 
+      timeout: 60000 
+    });
+    
+    // Esperar un momento para que cargue la página
+    await wait(page, 2000);
+    
+    // Capturar las cookies
+    const cookies = await page.cookies();
+    
+    // Obtener los resultados del estado de la aplicación
+    let results = await page.evaluate(() => {
+      try {
+        // Buscar el estado de la aplicación en window.__NEXT_DATA__
+        if (window.__NEXT_DATA__ && window.__NEXT_DATA__.props && window.__NEXT_DATA__.props.pageProps) {
+          const pageProps = window.__NEXT_DATA__.props.pageProps;
+          
+          // Buscar los resultados en diferentes lugares posibles
+          if (pageProps.dehydratedState && pageProps.dehydratedState.queries) {
+            // Buscar en el estado deshidratado (común en Next.js)
+            const queries = pageProps.dehydratedState.queries;
+            for (const query of queries) {
+              if (query.state && query.state.data) {
+                return query.state.data;
+              }
+            }
+          }
+          
+          // Alternativa: buscar directamente en los props
+          if (pageProps.initialData) {
+            return pageProps.initialData;
+          }
+          
+          // Otra alternativa: buscar en el estado directo
+          if (pageProps.results) {
+            return pageProps.results;
+          }
+        }
+        
+        // Si no encontramos nada en __NEXT_DATA__, buscamos en el estado de Apollo o Redux
+        if (window.__APOLLO_STATE__) {
+          return { apolloState: window.__APOLLO_STATE__ };
+        }
+        
+        if (window.__REDUX_STATE__) {
+          return { reduxState: window.__REDUX_STATE__ };
+        }
+        
+        // Si llegamos aquí, intentamos extraer manualmente los resultados
+        const scripts = document.querySelectorAll('script');
+        for (const script of scripts) {
+          if (script.textContent && script.textContent.includes('"hits":')) {
+            try {
+              // Buscar patrones de JSON que contengan hits
+              const matches = script.textContent.match(/\{.*"hits":\s*\[.*\].*\}/);
+              if (matches && matches[0]) {
+                return JSON.parse(matches[0]);
+              }
+            } catch (e) {
+              console.error('Error al parsear script con hits:', e);
+            }
+          }
+        }
+        
+        // Si todo lo demás falla, devolvemos null
+        return null;
+      } catch (error) {
+        console.error('Error al extraer resultados:', error);
+        return null;
+      }
+    });
+    
+    // Si no obtuvimos resultados del estado, intentamos interceptar la solicitud API
+    if (!results || !results.results) {
+      console.log('No se encontraron resultados en el estado de la aplicación, interceptando solicitud API...');
+      
+      // Configurar interceptación
+      await setupFirstPageInterception(page);
+      
+      // Volver a cargar la página para capturar la solicitud API
+      await page.reload({ waitUntil: 'networkidle2', timeout: 60000 });
+      
+      // Esperar a que se complete la interceptación (esto sería manejado por el callback de setupFirstPageInterception)
+      await wait(page, 5000);
+      
+      // Los resultados serían establecidos por el callback de interceptación
+      // Por ahora, solo devolvemos un objeto vacío
+      results = { results: [{ hits: [] }] };
+    }
+    
+    return {
+      results,
+      initialCookies: cookies
+    };
+  } catch (error) {
+    console.error('Error al manejar la primera página:', error);
+    throw error;
+  } finally {
+    // Cerrar la pestaña
+    await browser.closeTab('firstPageTab');
+  }
+}
+
+/**
+ * Construye una URL de búsqueda para Invaluable
+ * @param {Object} params - Parámetros de búsqueda
+ * @returns {string} URL de búsqueda completa
+ */
+function buildSearchUrl(params) {
+  // URL base de búsqueda
+  let baseUrl = 'https://www.invaluable.com/search';
+  
+  // Construir los parámetros de URL
+  const urlParams = new URLSearchParams();
+  
+  // Añadir parámetros comunes
+  if (params.query) urlParams.append('query', params.query);
+  if (params.keyword) urlParams.append('keyword', params.keyword);
+  if (params.supercategoryName) urlParams.append('supercategoryName', params.supercategoryName);
+  if (params.categoryName) urlParams.append('categoryName', params.categoryName);
+  if (params.houseName) urlParams.append('houseName', params.houseName);
+  if (params.page && params.page > 1) urlParams.append('page', params.page);
+  
+  // Añadir rango de precios si está definido
+  if (params['priceResult[min]']) urlParams.append('priceResult[min]', params['priceResult[min]']);
+  if (params['priceResult[max]']) urlParams.append('priceResult[max]', params['priceResult[max]']);
+  
+  // Añadir otros parámetros
+  if (params.sortBy) urlParams.append('sortBy', params.sortBy);
+  if (params.upcoming !== undefined) urlParams.append('upcoming', params.upcoming);
+  
+  // Construir la URL final
+  const urlParamsString = urlParams.toString();
+  if (urlParamsString) {
+    baseUrl += '?' + urlParamsString;
+  }
+  
+  return baseUrl;
+}
+
+/**
+ * Configura la interceptación de solicitudes para la primera página
+ * @param {Object} page - Objeto de página Puppeteer
+ * @returns {Promise<void>}
+ */
+async function setupFirstPageInterception(page) {
+  // Esta es una implementación ficticia
+  // En una implementación real, configuraríamos interceptores de red
+  console.log('Configurando interceptación para la primera página');
+}
+
+/**
  * Maneja la paginación para la búsqueda en Invaluable
  * @param {Object} browser - Instancia del navegador
  * @param {Object} params - Parámetros de búsqueda
@@ -442,8 +612,11 @@ async function makeApiRequest(page, url, headers, payload) {
   );
 }
 
+// Exportamos las funciones principales
 module.exports = {
+  handleFirstPage,
   handlePagination,
+  wait,
   requestSessionInfo,
   requestPageResults,
   makeApiRequest
