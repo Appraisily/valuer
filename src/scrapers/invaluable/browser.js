@@ -41,50 +41,28 @@ const browserConfig = {
 puppeteer.use(StealthPlugin());
 
 class BrowserManager {
-  constructor(options = {}) {
-    this.options = {
-      headless: options.headless || "new",
-      userDataDir: options.userDataDir,
-      args: options.args || [],
-      executablePath: options.executablePath
-    };
-    
+  constructor() {
     this.browser = null;
-    this.page = null;
     this.pages = new Map();
   }
 
-  async initialize({ width = 1920, height = 1080 } = {}) {
+  async initialize() {
     if (!this.browser) {
-      // Crear una instancia de stealth puppeteer
-      const puppeteer = require('puppeteer-extra');
-      const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-      puppeteer.use(StealthPlugin());
+      console.log('Initializing browser...');
+      const width = 1920 + Math.floor(Math.random() * 100);
+      const height = 1080 + Math.floor(Math.random() * 100);
 
-      // Crear opciones de lanzamiento base
-      const defaultArgs = [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu'
-      ];
-      
-      // Combinar con argumentos personalizados si existen
-      const launchArgs = [...new Set([...defaultArgs, ...this.options.args])];
-      
-      console.log('Launching browser with args:', launchArgs);
-      
-      // Configurar opciones de lanzamiento
-      const launchOptions = {
-        headless: this.options.headless,
-        args: launchArgs,
+      this.browser = await puppeteer.launch({
+        headless: 'new',
+        args: [
+          ...browserConfig.args,
+          `--window-size=${width},${height}`,
+          '--enable-javascript',
+          '--enable-features=NetworkService,NetworkServiceInProcess',
+          '--disable-blink-features=AutomationControlled'
+        ],
         ignoreHTTPSErrors: true,
-        defaultViewport: null,
-        timeout: 60000, // Aumentar timeout a 60 segundos
-        protocolTimeout: 60000,
-        ignoreDefaultArgs: ['--enable-automation'],
-        viewport: {
+        defaultViewport: {
           width,
           height,
           deviceScaleFactor: 1,
@@ -92,49 +70,7 @@ class BrowserManager {
           isLandscape: true,
           isMobile: false
         }
-      };
-      
-      // Agregar executablePath si está especificado
-      if (this.options.executablePath) {
-        console.log(`Using custom Chrome path: ${this.options.executablePath}`);
-        launchOptions.executablePath = this.options.executablePath;
-      }
-      
-      // Agregar userDataDir si está especificado
-      if (this.options.userDataDir) {
-        launchOptions.userDataDir = this.options.userDataDir;
-      }
-
-      console.log('Launching Chrome with options:', JSON.stringify({
-        headless: launchOptions.headless,
-        timeout: launchOptions.timeout,
-        executablePath: launchOptions.executablePath || 'default',
-        userDataDir: launchOptions.userDataDir || 'none'
-      }));
-
-      try {
-        this.browser = await puppeteer.launch(launchOptions);
-        console.log('Browser launched successfully');
-      } catch (error) {
-        console.error('Error launching browser:', error.message);
-        // Intentar con opciones más básicas si falla
-        if (error.message.includes('Timed out')) {
-          console.log('Timeout detected, trying with simplified options...');
-          delete launchOptions.ignoreDefaultArgs;
-          delete launchOptions.viewport;
-          
-          launchOptions.args = [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage'
-          ];
-          
-          this.browser = await puppeteer.launch(launchOptions);
-          console.log('Browser launched with simplified options');
-        } else {
-          throw error;
-        }
-      }
+      });
 
       this.page = await this.browser.newPage();
       
@@ -343,48 +279,88 @@ class BrowserManager {
     }
   }
 
-  /**
-   * Detecta y maneja páginas de protección como Cloudflare
-   * @returns {Promise<boolean>} - True si se detectó y manejó la protección, false si no
-   */
   async handleProtection() {
-    console.log('Handling protection page...');
-    const page = this.pages.get('main');
-    
     try {
-      // Verificar si estamos en una página de protección
-      const isProtectionPage = await page.evaluate(() => {
-        // Detectar elementos comunes de protección
-        const cfElements = document.querySelectorAll('[class*="cf-"], [id*="cf-"], [data-cf-"], #challenge-running, #challenge-form');
-        const pxElements = document.querySelectorAll('[id^="px-captcha"], .px-block');
-        
-        return cfElements.length > 0 || pxElements.length > 0;
+      console.log('Handling protection page...');
+      
+      // Mejorado el manejo de Cloudflare
+      const page = this.getPage();
+      
+      // Detectar si estamos en una página de protección de Cloudflare
+      const cloudflareDetected = await page.evaluate(() => {
+        return document.querySelector('#cf-error-details') !== null ||
+               document.querySelector('.cf-error-code') !== null ||
+               document.querySelector('#challenge-running') !== null ||
+               document.querySelector('#challenge-form') !== null ||
+               document.querySelector('title')?.innerText.includes('Attention Required') ||
+               document.querySelector('title')?.innerText.includes('Cloudflare') ||
+               document.body?.innerText.includes('checking your browser') ||
+               document.body?.innerText.includes('Please turn JavaScript on');
       });
       
-      if (isProtectionPage) {
-        console.log('Detectada página de protección, intentando resolver...');
+      if (!cloudflareDetected) {
+        console.log('No se detectó página de protección de Cloudflare, continuando normalmente.');
+        return true;
+      }
+      
+      console.log('Detectada protección de Cloudflare, intentando bypass...');
+      
+      // Comportamiento más humano
+      // Añadir movimientos aleatorios del ratón
+      for (let i = 0; i < 5; i++) {
+        await page.mouse.move(
+          100 + Math.random() * 500,
+          100 + Math.random() * 300,
+          { steps: 25 }
+        );
+        await page.evaluate(ms => new Promise(r => setTimeout(r, ms)), 500 + Math.random() * 1000);
+      }
+      
+      // Simular scrolling como un humano
+      await page.evaluate(() => {
+        return new Promise((resolve) => {
+          let totalHeight = 0;
+          const distance = 100;
+          const timer = setInterval(() => {
+            window.scrollBy(0, distance);
+            totalHeight += distance;
+            
+            if (totalHeight >= 1000) {
+              clearInterval(timer);
+              setTimeout(resolve, 1000);
+            }
+          }, 100);
+        });
+      });
+      
+      // Esperar a que el desafío se resuelva potencialmente
+      console.log('Esperando a que se resuelva el desafío de Cloudflare...');
+      await page.evaluate(ms => new Promise(r => setTimeout(r, ms)), 10000);
+      
+      // Verificar si el desafío se ha resuelto
+      const challengeResolved = await page.evaluate(() => {
+        return document.querySelector('#challenge-running') === null &&
+               document.querySelector('#challenge-form') === null &&
+               !document.body?.innerText.includes('checking your browser');
+      });
+      
+      if (challengeResolved) {
+        console.log('¡Desafío de Cloudflare resuelto! Continuando...');
         
-        // Esperar a que se complete el desafío
-        await page.waitForFunction(() => {
-          // Verificar si el desafío ha desaparecido
-          const cfElements = document.querySelectorAll('[class*="cf-"], [id*="cf-"], [data-cf-"], #challenge-running, #challenge-form');
-          const pxElements = document.querySelectorAll('[id^="px-captcha"], .px-block');
-          
-          return cfElements.length === 0 && pxElements.length === 0;
-        }, { timeout: 30000 }); // 30 segundos para resolver
+        // Extraer y guardar las cookies de Cloudflare para uso futuro
+        const cookies = await page.cookies();
+        const cfClearance = cookies.find(c => c.name === 'cf_clearance');
+        if (cfClearance) {
+          console.log('Cookie cf_clearance encontrada:', cfClearance.value);
+        }
         
-        // Esperar a que se estabilice la página
-        await page.waitForTimeout(5000);
-        
-        console.log('✅ Protección resuelta correctamente');
         return true;
       } else {
-        console.log('No se detectó página de protección de Cloudflare, continuando normalmente.');
+        console.log('No se pudo resolver el desafío de Cloudflare automáticamente.');
         return false;
       }
     } catch (error) {
-      console.error('Error al manejar protección:', error);
-      // A pesar del error, intentamos continuar
+      console.error('Error al manejar la protección:', error);
       return false;
     }
   }
