@@ -313,7 +313,7 @@ class BrowserManager {
           100 + Math.random() * 300,
           { steps: 25 }
         );
-        await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
+        await page.evaluate(ms => new Promise(r => setTimeout(r, ms)), 500 + Math.random() * 1000);
       }
       
       // Simular scrolling como un humano
@@ -335,7 +335,7 @@ class BrowserManager {
       
       // Esperar a que el desafío se resuelva potencialmente
       console.log('Esperando a que se resuelva el desafío de Cloudflare...');
-      await page.waitForTimeout(10000);
+      await page.evaluate(ms => new Promise(r => setTimeout(r, ms)), 10000);
       
       // Verificar si el desafío se ha resuelto
       const challengeResolved = await page.evaluate(() => {

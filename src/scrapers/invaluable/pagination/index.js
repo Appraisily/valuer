@@ -19,6 +19,17 @@ const {
 } = require('./results-processor');
 
 /**
+ * Helper function to wait for a specific time
+ * @param {Object} page - Page object
+ * @param {number} ms - Milliseconds to wait
+ * @returns {Promise<void>}
+ */
+async function wait(page, ms) {
+  // Use page.evaluate with setTimeout for compatibility
+  return page.evaluate(ms => new Promise(r => setTimeout(r, ms)), ms);
+}
+
+/**
  * Maneja la paginación para la búsqueda en Invaluable
  * @param {Object} browser - Instancia del navegador
  * @param {Object} params - Parámetros de búsqueda
@@ -138,7 +149,7 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
         if (failedPages.has(pageNum)) {
           const waitTime = 2000 + (failedPages.size * 500);
           console.log(`Reintentando página ${pageNum} después de ${waitTime}ms`);
-          await page.waitForTimeout(waitTime);
+          await wait(page, waitTime);
         }
         
         // Solicitar info de sesión para mantener cookies frescas
@@ -148,7 +159,7 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
         }
         
         // Esperar un poco entre solicitudes para evitar detección
-        await page.waitForTimeout(500 + Math.random() * 500);
+        await wait(page, 500 + Math.random() * 500);
         
         // Solicitar resultados de la página actual
         const pageResults = await requestPageResults(page, pageNum, params, navState);
@@ -211,7 +222,7 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
         failedPages.add(pageNum);
         
         // Esperar un poco más en caso de error
-        await page.waitForTimeout(2000);
+        await wait(page, 2000);
       }
     }
   } catch (error) {
