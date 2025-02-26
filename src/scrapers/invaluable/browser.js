@@ -42,39 +42,49 @@ puppeteer.use(StealthPlugin());
 
 class BrowserManager {
   constructor(options = {}) {
-    this.browser = null;
-    this.pages = new Map();
-    
-    // Almacenar opciones para inicialización
     this.options = {
-      headless: options.headless || 'new',
-      userDataDir: options.userDataDir || null,
-      args: options.args || []
+      headless: options.headless || "new",
+      userDataDir: options.userDataDir,
+      args: options.args || [],
+      executablePath: options.executablePath
     };
+    
+    this.browser = null;
+    this.page = null;
+    this.pages = new Map();
   }
 
-  async initialize() {
+  async initialize({ width = 1920, height = 1080 } = {}) {
     if (!this.browser) {
-      console.log('Initializing browser...');
-      const width = 1920 + Math.floor(Math.random() * 100);
-      const height = 1080 + Math.floor(Math.random() * 100);
+      // Crear una instancia de stealth puppeteer
+      const puppeteer = require('puppeteer-extra');
+      const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+      puppeteer.use(StealthPlugin());
 
-      // Combinar argumentos predeterminados con los proporcionados
-      const launchArgs = [
-        ...browserConfig.args,
-        `--window-size=${width},${height}`,
-        '--enable-javascript',
-        '--enable-features=NetworkService,NetworkServiceInProcess',
-        '--disable-blink-features=AutomationControlled',
-        ...this.options.args // Agregar args personalizados
+      // Crear opciones de lanzamiento base
+      const defaultArgs = [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu'
       ];
       
-      // Configuración para la inicialización
+      // Combinar con argumentos personalizados si existen
+      const launchArgs = [...new Set([...defaultArgs, ...this.options.args])];
+      
+      console.log('Launching browser with args:', launchArgs);
+      
+      // Configurar opciones de lanzamiento
       const launchOptions = {
         headless: this.options.headless,
         args: launchArgs,
         ignoreHTTPSErrors: true,
-        defaultViewport: {
+        defaultViewport: null,
+        timeout: 60000, // Aumentar timeout a 60 segundos
+        protocolTimeout: 60000,
+        ignoreDefaultArgs: ['--enable-automation'],
+        viewport: {
           width,
           height,
           deviceScaleFactor: 1,
@@ -84,12 +94,47 @@ class BrowserManager {
         }
       };
       
+      // Agregar executablePath si está especificado
+      if (this.options.executablePath) {
+        console.log(`Using custom Chrome path: ${this.options.executablePath}`);
+        launchOptions.executablePath = this.options.executablePath;
+      }
+      
       // Agregar userDataDir si está especificado
       if (this.options.userDataDir) {
         launchOptions.userDataDir = this.options.userDataDir;
       }
 
-      this.browser = await puppeteer.launch(launchOptions);
+      console.log('Launching Chrome with options:', JSON.stringify({
+        headless: launchOptions.headless,
+        timeout: launchOptions.timeout,
+        executablePath: launchOptions.executablePath || 'default',
+        userDataDir: launchOptions.userDataDir || 'none'
+      }));
+
+      try {
+        this.browser = await puppeteer.launch(launchOptions);
+        console.log('Browser launched successfully');
+      } catch (error) {
+        console.error('Error launching browser:', error.message);
+        // Intentar con opciones más básicas si falla
+        if (error.message.includes('Timed out')) {
+          console.log('Timeout detected, trying with simplified options...');
+          delete launchOptions.ignoreDefaultArgs;
+          delete launchOptions.viewport;
+          
+          launchOptions.args = [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage'
+          ];
+          
+          this.browser = await puppeteer.launch(launchOptions);
+          console.log('Browser launched with simplified options');
+        } else {
+          throw error;
+        }
+      }
 
       this.page = await this.browser.newPage();
       

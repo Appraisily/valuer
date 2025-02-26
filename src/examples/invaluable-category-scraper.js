@@ -21,7 +21,7 @@ const CONFIG = {
   
   // Browser settings
   userDataDir: path.join(__dirname, '../../temp/chrome-data'),
-  headless: true,            // Set to true for production and container environments
+  headless: "new",            // Usar el nuevo modo headless para evitar warnings
   
   // Storage settings
   gcsEnabled: true,           // Enable Google Cloud Storage
@@ -178,8 +178,19 @@ async function scrapeCategory(config = CONFIG) {
       '--disable-setuid-sandbox',
       '--no-first-run',
       '--no-zygote',
-      '--single-process'
-    ]
+      '--single-process',
+      '--disable-extensions',
+      '--disable-features=site-per-process',
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins',
+      '--disable-features=BlockInsecurePrivateNetworkRequests',
+      '--disable-infobars',
+      '--window-size=1920,1080',
+      '--start-maximized',
+      '--remote-debugging-port=0',
+      '--blink-settings=imagesEnabled=true'
+    ],
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
   });
   
   try {

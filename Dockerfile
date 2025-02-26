@@ -3,7 +3,9 @@ FROM node:18-slim
 # Configurar variables de entorno para reducir el tamaño de la instalación de Puppeteer
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome \
-    NODE_ENV=production
+    CHROME_PATH=/usr/bin/google-chrome \
+    NODE_ENV=production \
+    NODE_OPTIONS="--max-old-space-size=4096"
 
 # Instalar Chrome y otras dependencias necesarias
 RUN apt-get update && apt-get install -y \
@@ -33,13 +35,16 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 
 # Instalar dependencias de producción solamente con un timeout extendido
-RUN npm install --only=production --no-optional --loglevel error --fetch-timeout=600000
+RUN npm config set fetch-timeout 300000 \
+    && npm config set network-timeout 300000 \
+    && npm install --no-optional --only=production --loglevel verbose
 
 # Copiar el resto del código fuente
 COPY . .
 
 # Crear directorios necesarios
-RUN mkdir -p temp/chrome-data temp/checkpoints
+RUN mkdir -p temp/chrome-data temp/checkpoints \
+    && chmod -R 777 temp
 
 # Exponer el puerto que usa el servidor HTTP
 EXPOSE 8080

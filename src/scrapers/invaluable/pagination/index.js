@@ -18,6 +18,9 @@ const {
   shouldContinueProcessing
 } = require('./results-processor');
 
+// Import our implementation of handleFirstPage
+const { handleFirstPage } = require('./first-page-handler');
+
 /**
  * Helper function to wait for a specific time
  * @param {Object} page - Page object
@@ -446,5 +449,6 @@ module.exports = {
   handlePagination,
   requestSessionInfo,
   requestPageResults,
-  makeApiRequest
+  makeApiRequest,
+  handleFirstPage  // Add our handleFirstPage implementation to exports
 }; 
