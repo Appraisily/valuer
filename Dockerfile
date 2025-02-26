@@ -35,9 +35,9 @@ WORKDIR /usr/src/app
 COPY package*.json ./
 
 # Instalar dependencias de producción solamente con un timeout extendido
-RUN npm config set fetch-timeout 300000 \
-    && npm config set network-timeout 300000 \
-    && npm install --no-optional --only=production --loglevel verbose
+RUN npm config set fetch-retry-mintimeout 20000 \
+    && npm config set fetch-retry-maxtimeout 120000 \
+    && npm install --no-optional --only=production
 
 # Copiar el resto del código fuente
 COPY . .
