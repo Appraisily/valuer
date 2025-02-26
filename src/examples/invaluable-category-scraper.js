@@ -5,6 +5,7 @@
  * with resumable pagination, progress tracking, rate limiting, and GCS storage.
  */
 const path = require('path');
+const http = require('http');
 const BrowserManager = require('../scrapers/invaluable/browser');
 const { buildSearchParams } = require('../scrapers/invaluable/utils');
 const { handleFirstPage } = require('../scrapers/invaluable/pagination');
@@ -19,7 +20,7 @@ const CONFIG = {
   
   // Browser settings
   userDataDir: path.join(__dirname, '../../temp/chrome-data'),
-  headless: false,            // Set to true for production
+  headless: true,            // Set to true for production and container environments
   
   // Storage settings
   gcsEnabled: true,           // Enable Google Cloud Storage
@@ -39,6 +40,49 @@ const CONFIG = {
   checkpointDir: path.join(__dirname, '../../temp/checkpoints'),
 };
 
+// Estado global para el servidor HTTP
+let scrapingStatus = {
+  running: false,
+  category: '',
+  currentPage: 0,
+  totalPages: 0,
+  itemsCollected: 0,
+  startTime: null,
+  error: null
+};
+
+/**
+ * Inicia un servidor HTTP simple para Cloud Run
+ * Necesario para que Cloud Run considere el servicio como "saludable"
+ */
+function startHttpServer() {
+  const port = process.env.PORT || 8080;
+  
+  const server = http.createServer((req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    
+    if (req.url === '/health' || req.url === '/') {
+      // Endpoint de salud para Cloud Run
+      res.statusCode = 200;
+      res.end(JSON.stringify({
+        status: 'ok',
+        message: 'Invaluable Scraper is running',
+        scraping: scrapingStatus.running,
+        stats: scrapingStatus
+      }));
+    } else {
+      res.statusCode = 404;
+      res.end(JSON.stringify({ error: 'Not found' }));
+    }
+  });
+  
+  server.listen(port, () => {
+    console.log(`HTTP server listening on port ${port}`);
+  });
+  
+  return server;
+}
+
 /**
  * Main scraper function
  */
@@ -46,14 +90,28 @@ async function scrapeCategory() {
   console.log(`Starting Invaluable category scraper for: ${CONFIG.category}`);
   console.log(`Will scrape up to ${CONFIG.maxPages} pages with batch size of ${CONFIG.batchSize}`);
   
-  // Initialize browser
+  // Actualizar estado
+  scrapingStatus.running = true;
+  scrapingStatus.category = CONFIG.category;
+  scrapingStatus.startTime = new Date().toISOString();
+  
+  // Initialize browser with configuración optimizada para contenedor
   const browser = new BrowserManager({
     userDataDir: CONFIG.userDataDir,
     headless: CONFIG.headless,
+    args: [
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-setuid-sandbox',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process'
+    ]
   });
   
   try {
-    await browser.init();
+    await browser.initialize();
     console.log('Browser initialized');
     
     // Build search parameters for the category
@@ -67,11 +125,19 @@ async function scrapeCategory() {
     const { results: firstPageResults, initialCookies } = await handleFirstPage(browser, searchParams);
     
     if (!firstPageResults || !firstPageResults.results || !firstPageResults.results[0]?.hits) {
-      throw new Error('Failed to get first page results');
+      const errorMsg = 'Failed to get first page results';
+      scrapingStatus.error = errorMsg;
+      throw new Error(errorMsg);
     }
     
     const totalHits = firstPageResults.results[0].meta?.totalHits || 0;
+    const totalPages = Math.ceil(totalHits / 96);
     console.log(`Found ${totalHits} total items in ${CONFIG.category}`);
+    
+    // Actualizar estado
+    scrapingStatus.totalPages = Math.min(totalPages, CONFIG.maxPages);
+    scrapingStatus.currentPage = 1;
+    scrapingStatus.itemsCollected = firstPageResults.results[0].hits.length;
     
     // Initialize the pagination manager
     const paginationManager = new PaginationManager({
@@ -89,6 +155,11 @@ async function scrapeCategory() {
       maxDelay: CONFIG.maxDelay,
       minDelay: CONFIG.minDelay,
       maxRetries: CONFIG.maxRetries,
+      onProgress: (stats) => {
+        // Actualizar estado con el progreso
+        scrapingStatus.currentPage = stats.completedPages;
+        scrapingStatus.itemsCollected = stats.totalItems;
+      }
     });
     
     // Process pagination
@@ -116,9 +187,16 @@ async function scrapeCategory() {
       console.log(`GCS Bucket: gs://${CONFIG.gcsBucket}/raw/${CONFIG.category}/`);
     }
     
+    // Actualizar estado final
+    scrapingStatus.running = false;
+    scrapingStatus.finishedAt = new Date().toISOString();
+    scrapingStatus.stats = stats;
+    
     return stats;
   } catch (error) {
     console.error('Error during scraping:', error);
+    scrapingStatus.running = false;
+    scrapingStatus.error = error.message;
     throw error;
   } finally {
     // Always close the browser
@@ -131,14 +209,25 @@ async function scrapeCategory() {
  * Run the scraper if this file is called directly
  */
 if (require.main === module) {
+  // Iniciar el servidor HTTP primero (necesario para Cloud Run)
+  const server = startHttpServer();
+  
   scrapeCategory()
     .then(() => {
       console.log('Scraping completed successfully');
-      process.exit(0);
+      // En producción, puede ser mejor mantener el proceso en ejecución
+      // Si estamos en desarrollo, podemos salir
+      if (process.env.NODE_ENV === 'development') {
+        process.exit(0);
+      }
     })
     .catch(error => {
       console.error('Scraping failed:', error);
-      process.exit(1);
+      // En producción, puede ser mejor mantener el proceso en ejecución
+      // Si estamos en desarrollo, podemos salir con error
+      if (process.env.NODE_ENV === 'development') {
+        process.exit(1);
+      }
     });
 }
 
