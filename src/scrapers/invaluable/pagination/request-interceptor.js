@@ -153,82 +153,98 @@ function buildRequestHeaders(cookies, referer = 'https://www.invaluable.com/sear
  * @returns {Object} - Payload para la solicitud
  */
 function buildResultsPayload(params, pageNum, navState) {
-  // Crear un formato de solicitud basado en la estructura real que usa Invaluable
-  // Se basa en el formato capturado en las respuestas de la primera página
+  // Convertir a formato basado en índice 0 (0 = primera página)
+  const algoliaPage = pageNum - 1;
+  
+  console.log(`Construyendo payload para página ${pageNum} (índice ${algoliaPage})`);
+  
+  // Construir el payload en formato Algolia
   const payload = {
-    query: params.query || '',
-    upcoming: 'false',
-    page: pageNum,
-    keyword: params.keyword || params.query || '',
-    timestamp: Date.now(),
+    requests: [{
+      indexName: "archive_prod",
+      params: {
+        // Atributos a recuperar (todos los campos necesarios)
+        attributesToRetrieve: [
+          "watched",
+          "dateTimeUTCUnix",
+          "currencyCode",
+          "dateTimeLocal",
+          "lotTitle",
+          "lotNumber",
+          "lotRef",
+          "photoPath",
+          "houseName",
+          "currencySymbol",
+          "currencyCode",
+          "priceResult",
+          "saleType"
+        ],
+        // Analíticas y configuración de facetas
+        clickAnalytics: true,
+        getRankingInfo: true,
+        
+        // Configuración de resultados por página
+        hitsPerPage: 96,
+        maxValuesPerFacet: 50,
+        
+        // Configuración de resaltado
+        highlightPostTag: "</ais-highlight-0000000000>",
+        highlightPreTag: "<ais-highlight-0000000000>",
+        
+        // Parámetros de paginación y búsqueda
+        page: algoliaPage,
+        query: params.query || "",
+        
+        // Filtros
+        filters: params.filters || "banned:false AND dateTimeUTCUnix<1740561842 AND onlineOnly:false AND channelIDs:1 AND closed:true",
+        
+        // Contextos y etiquetas
+        ruleContexts: "",
+        tagFilters: "",
+        
+        // Token de usuario (usar el proporcionado o un valor por defecto)
+        userToken: params.userToken || navState.userToken || "9166383",
+        
+        // Facetas a incluir
+        facets: [
+          "hasImage",
+          "supercategoryName",
+          "artistName",
+          "dateTimeUTCUnix",
+          "houseName",
+          "countryName",
+          "currencyCode",
+          "priceResult"
+        ]
+      }
+    }]
   };
   
-  // Verificar si tenemos pageSize en los parámetros
-  if (params.pageSize) {
-    payload.pageSize = params.pageSize;
+  // Si es página 2 o posterior, añadir facetas adicionales (como se ve en la solicitud real)
+  if (pageNum > 1) {
+    payload.requests[0].params.facets = [
+      ...payload.requests[0].params.facets,
+      "Furniture",
+      "Fine Art",
+      "Collectibles",
+      "Decorative Art",
+      "Firearms",
+      "Asian Art & Antiques",
+      "Dolls%2C Bears & Toys",
+      "Wines & Spirits",
+      "Jewelry",
+      "Commercial & Industrial"
+    ];
   }
   
-  // Verificar si tenemos parámetros de precio
-  if (params.priceResult) {
-    if (params.priceResult.min) {
-      payload['priceResult[min]'] = params.priceResult.min;
-    }
-    if (params.priceResult.max) {
-      payload['priceResult[max]'] = params.priceResult.max;
-    }
-  }
-  
-  // Añadir refId si está disponible (clave para paginación)
+  // Si tenemos refId de Algolia, añadirlo
   if (navState.refId) {
-    payload.refId = navState.refId;
-    console.log(`Usando refId para página ${pageNum}: ${navState.refId}`);
+    // Nota: En Algolia, esto podría ir como un parámetro adicional
+    // Pero basado en las solicitudes observadas, no parece usarse
+    console.log(`Tenemos refId disponible: ${navState.refId}, pero no se incluye en formato Algolia`);
   } else {
-    console.log(`Sin refId disponible, usando sequence: ${pageNum}`);
-    
-    // Intentamos usar una estrategia alternativa más robusta para la paginación
-    // Incluir campos que podrían ayudar a la API a mantener contexto
-    
-    // Alternativa 1: Usar un ID persistente basado en la consulta
-    const queryHash = generateQueryHash(params);
-    payload.queryId = queryHash;
-    
-    // Alternativa 2: Añadir información de paginación más explícita
-    payload.start = (pageNum - 1) * (params.pageSize || 96);
-    payload.size = params.pageSize || 96;
-    
-    // Alternativa 3: Agregar información de orden para mantener consistencia
-    payload.sort = params.sort || 'LowestPriceAsc';
-    
-    console.log(`Usando estrategia alternativa de paginación con queryId: ${queryHash}`);
+    console.log(`Sin refId disponible, usando formato Algolia estándar con page=${algoliaPage}`);
   }
-  
-  // Añadir searchContext si está disponible
-  if (navState.searchContext) {
-    payload.searchContext = navState.searchContext;
-    console.log(`Usando searchContext para página ${pageNum}: ${navState.searchContext}`);
-  }
-  
-  // Añadir searcher si está disponible
-  if (navState.searcher) {
-    payload.searcher = navState.searcher;
-    console.log(`Usando searcher para página ${pageNum}: ${navState.searcher}`);
-  }
-  
-  // Agregar cualquier otro parámetro que no sea null o undefined
-  Object.entries(params).forEach(([key, value]) => {
-    if (
-      value !== undefined && 
-      value !== null && 
-      !['query', 'keyword', 'page', 'pageSize', 'priceResult', 'cookies'].includes(key) &&
-      typeof value !== 'object'
-    ) {
-      payload[key] = value;
-    }
-  });
-  
-  // Añadir campos adicionales que pueden ayudar con la compatibilidad
-  payload.clientType = 'web';
-  payload.requestId = `req_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
   
   return payload;
 }
