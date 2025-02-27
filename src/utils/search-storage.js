@@ -7,7 +7,13 @@ const path = require('path');
 
 class SearchStorageService {
   constructor(options = {}) {
-    this.bucketName = options.bucketName || 'invaluable-data';
+    // Use STORAGE_BUCKET environment variable, or the provided bucket name, 
+    // or the hardcoded fallback value
+    this.bucketName = process.env.STORAGE_BUCKET || 
+                      options.bucketName || 
+                      'invaluable-html-archive';
+    
+    console.log(`Using GCS bucket: ${this.bucketName}`);
     
     // Initialize Storage with provided credentials or use default
     if (options.credentials) {
