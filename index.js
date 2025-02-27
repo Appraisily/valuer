@@ -2,6 +2,9 @@
 
 const express = require('express');
 const { scrapeCategory, CONFIG } = require('./src/examples/invaluable-category-scraper');
+const BrowserManager = require('./src/scrapers/invaluable/browser');
+const { buildSearchParams } = require('./src/scrapers/invaluable/utils');
+const { handleFirstPage } = require('./src/scrapers/invaluable/pagination');
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -29,6 +32,67 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// The previously working search endpoint
+app.get('/api/search', async (req, res) => {
+  try {
+    const maxPages = req.query.maxPages ? parseInt(req.query.maxPages) : 3;
+    const fetchAllPages = req.query.fetchAllPages === 'true';
+    
+    console.log(`Search request for query: ${req.query.query}, maxPages: ${maxPages}, fetchAllPages: ${fetchAllPages}`);
+    
+    // Initialize browser
+    const browser = new BrowserManager({
+      headless: true,
+      // Don't use userDataDir in Cloud Run
+      userDataDir: process.env.K_SERVICE ? null : './temp/chrome-data'
+    });
+    
+    try {
+      await browser.initialize();
+      console.log('Browser initialized for search');
+      
+      // Build search parameters from the request query
+      const searchParams = buildSearchParams(req.query);
+      
+      // Get first page results
+      console.log(`Getting search results for: ${JSON.stringify(searchParams)}`);
+      const { results, initialCookies } = await handleFirstPage(browser, searchParams);
+      
+      if (!results) {
+        throw new Error('Failed to get search results');
+      }
+      
+      res.json({
+        success: true,
+        timestamp: new Date().toISOString(),
+        parameters: req.query,
+        data: results
+      });
+      
+    } catch (error) {
+      console.error('Error during search:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Search failed',
+        error: error.message
+      });
+    } finally {
+      // Always close the browser
+      if (browser) {
+        await browser.close();
+        console.log('Browser closed after search');
+      }
+    }
+  } catch (error) {
+    console.error('Error in search endpoint:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
 // API to start a scraper job
 app.post('/api/scraper/start', async (req, res) => {
   try {
@@ -39,7 +103,11 @@ app.post('/api/scraper/start', async (req, res) => {
       ...CONFIG,
       ...req.body,
       // Default to 3 pages for safety as requested
-      maxPages: req.body.maxPages || 3
+      maxPages: req.body.maxPages || 3,
+      // Force headless true in Cloud Run
+      headless: true,
+      // Don't use userDataDir in Cloud Run
+      userDataDir: process.env.K_SERVICE ? null : CONFIG.userDataDir
     };
     
     console.log(`Starting job ${jobId} with config:`, config);
@@ -129,5 +197,6 @@ app.get('/api/scraper/jobs', (req, res) => {
 app.listen(port, '0.0.0.0', () => {
   console.log(`Invaluable Scraper API running on port ${port}`);
   console.log(`Health check: http://localhost:${port}/`);
+  console.log(`Direct search: http://localhost:${port}/api/search?query=furniture&maxPages=3`);
   console.log(`Start a scraper job: POST http://localhost:${port}/api/scraper/start`);
 });

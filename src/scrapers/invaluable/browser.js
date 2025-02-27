@@ -17,7 +17,11 @@ const browserConfig = {
     '--disable-notifications',
     '--disable-popup-blocking',
     '--disable-blink-features=AutomationControlled',
-    '--disable-browser-side-navigation'
+    '--disable-browser-side-navigation',
+    '--disable-gpu',
+    '--disable-extensions',
+    '--single-process',
+    '--no-zygote'
   ],
   userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
   headers: {
@@ -41,49 +45,59 @@ const browserConfig = {
 puppeteer.use(StealthPlugin());
 
 class BrowserManager {
-  constructor() {
+  constructor(options = {}) {
     this.browser = null;
+    this.page = null;
+    this.options = {
+      ...options,
+      headless: options.headless !== false // Default to headless: true
+    };
+    this.cookieJar = [];
     this.pages = new Map();
   }
 
   async initialize() {
-    if (!this.browser) {
-      console.log('Initializing browser...');
-      const width = 1920 + Math.floor(Math.random() * 100);
-      const height = 1080 + Math.floor(Math.random() * 100);
-
-      this.browser = await puppeteer.launch({
-        headless: 'new',
-        args: [
-          ...browserConfig.args,
-          `--window-size=${width},${height}`,
-          '--enable-javascript',
-          '--enable-features=NetworkService,NetworkServiceInProcess',
-          '--disable-blink-features=AutomationControlled'
-        ],
+    console.log('Initializing browser...');
+    
+    try {
+      puppeteer.use(StealthPlugin());
+      
+      // Add Cloud Run specific launch options
+      const launchOptions = {
+        headless: this.options.headless,
+        args: [...browserConfig.args],
         ignoreHTTPSErrors: true,
-        defaultViewport: {
-          width,
-          height,
-          deviceScaleFactor: 1,
-          hasTouch: false,
-          isLandscape: true,
-          isMobile: false
-        }
-      });
-
+        timeout: 60000, // Increase timeout to 60 seconds
+        product: 'chrome',
+      };
+      
+      // Add userDataDir only if not running in Cloud Run (can cause issues)
+      if (this.options.userDataDir && !process.env.K_SERVICE) {
+        launchOptions.userDataDir = this.options.userDataDir;
+      }
+      
+      this.browser = await puppeteer.launch(launchOptions);
+      
+      // Create a new page and configure it
       this.page = await this.browser.newPage();
       
-      // Set viewport with device scale factor for better rendering
-      await this.page.setViewport({ 
-        width,
-        height,
+      // Set user agent
+      await this.page.setUserAgent(browserConfig.userAgent);
+      
+      // Set extra headers
+      await this.page.setExtraHTTPHeaders(browserConfig.headers);
+      
+      // Set viewport
+      await this.page.setViewport({
+        width: 1920,
+        height: 1080,
         deviceScaleFactor: 1,
-        hasTouch: false,
-        isLandscape: true,
-        isMobile: false
       });
-
+      
+      // Set timeout for navigation
+      this.page.setDefaultNavigationTimeout(60000);
+      this.page.setDefaultTimeout(60000);
+      
       // Override navigator.webdriver
       await this.page.evaluateOnNewDocument(() => {
         Object.defineProperty(navigator, 'webdriver', {
@@ -230,6 +244,12 @@ class BrowserManager {
           });
         };
       });
+
+      console.log('Browser initialized successfully');
+      return this.browser;
+    } catch (error) {
+      console.error('Failed to initialize browser:', error.message);
+      throw error;
     }
   }
 

@@ -5,6 +5,48 @@ A specialized Node.js tool for accessing and extracting data from Invaluable's a
 1. **API Service**: A RESTful API that intercepts and returns raw JSON responses from Invaluable's search endpoints
 2. **Enhanced Scraper**: A robust scraper with pagination support and Google Cloud Storage integration
 
+## Deployed Service
+
+The service is currently deployed and accessible at:
+
+**https://valuer-dev-856401495068.us-central1.run.app**
+
+### Quick Tests
+
+#### Direct Search API (Fastest Option):
+```bash
+curl "https://valuer-dev-856401495068.us-central1.run.app/api/search?query=furniture&fetchAllPages=true&maxPages=3"
+```
+
+#### Start Scraper Job:
+```bash
+curl -X POST https://valuer-dev-856401495068.us-central1.run.app/api/scraper/start \
+  -H "Content-Type: application/json" \
+  -d '{"category":"furniture", "maxPages": 3}'
+```
+
+#### Check Job Status:
+```bash
+curl https://valuer-dev-856401495068.us-central1.run.app/api/scraper/jobs
+```
+
+## Current State & Known Issues
+
+The repository includes two main methods to access data:
+
+1. **Direct Search API**: The `/api/search` endpoint provides immediate results and is the most reliable option, particularly in Cloud Run environments.
+
+2. **Background Scraper**: The `/api/scraper/start` endpoint begins a background job but may encounter browser initialization issues in constrained environments.
+
+### Known Issues in Cloud Run
+
+Running Puppeteer/Chrome in Cloud Run has some limitations:
+- Memory constraints can cause browser launch timeouts 
+- Chrome sandbox restrictions may affect performance
+- Headless mode is required and user data directories should be disabled
+
+The direct search API (`/api/search`) is optimized for these constraints and provides the most reliable results.
+
 ## Overview
 
 This project provides powerful tools for searching and collecting data from Invaluable's catalog by:
@@ -65,6 +107,26 @@ This project provides powerful tools for searching and collecting data from Inva
 - **Adaptive Rate Limiting**: Smart delays to avoid detection
 - **Fault Tolerance**: Auto-retry with exponential backoff
 - **Google Cloud Storage Integration**: Store results directly to GCS
+
+## Current State
+
+The repository now features a RESTful API that controls the scraper rather than running it automatically on startup. Key improvements:
+
+- API-driven approach to start and monitor scraping jobs
+- Default limit of 3 pages per job for safety (configurable)
+- Cloud Run compatibility with proper port binding
+- Job status tracking and management
+- Improved error handling and browser initialization
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Health check and active jobs |
+| `/api/config` | GET | View current configuration |
+| `/api/scraper/start` | POST | Start a new scraper job |
+| `/api/scraper/jobs` | GET | List all jobs |
+| `/api/scraper/job/:jobId` | GET | Get specific job status |
 
 ## Prerequisites
 
@@ -161,6 +223,35 @@ curl "http://localhost:8080/api/search?houseName=DOYLE%20Auctioneers%20%26%20App
 
 The enhanced scraper provides tools for large-scale data collection with resilient pagination handling.
 
+### Starting a Scraper Job
+
+```bash
+# Start a scraper job with 3 pages of furniture data
+curl -X POST https://valuer-dev-856401495068.us-central1.run.app/api/scraper/start \
+  -H "Content-Type: application/json" \
+  -d '{"category":"furniture", "maxPages": 3}'
+
+# Start a job with custom parameters
+curl -X POST https://valuer-dev-856401495068.us-central1.run.app/api/scraper/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "category": "art",
+    "maxPages": 5,
+    "baseDelay": 2000,
+    "maxDelay": 5000
+  }'
+```
+
+### Checking Job Status
+
+```bash
+# List all jobs
+curl https://valuer-dev-856401495068.us-central1.run.app/api/scraper/jobs
+
+# Check a specific job
+curl https://valuer-dev-856401495068.us-central1.run.app/api/scraper/job/YOUR_JOB_ID
+```
+
 ### Storage Structure
 
 ```
@@ -183,35 +274,18 @@ Edit `src/examples/invaluable-category-scraper.js` to customize:
 - Rate limiting parameters
 - Google Cloud Storage settings
 
-### Running the Scraper
+### Running the Scraper Locally
 
-Run the example scraper:
+Run the API server:
 
 ```bash
 npm start
 ```
 
-Or programmatically:
+Or run the scraper directly (not recommended for production):
 
-```javascript
-const PaginationManager = require('./src/scrapers/invaluable/pagination/pagination-manager');
-
-// Initialize the pagination manager
-const paginationManager = new PaginationManager({
-  category: 'furniture',
-  maxPages: 4000,
-  gcsEnabled: true,
-  gcsBucket: 'invaluable-data',
-  batchSize: 100,
-});
-
-// Use it in your scraper
-const results = await paginationManager.processPagination(
-  browser,
-  searchParams,
-  firstPageResults,
-  initialCookies
-);
+```bash
+npm run start:scraper
 ```
 
 ## Deployment

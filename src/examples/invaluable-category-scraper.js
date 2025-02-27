@@ -25,25 +25,26 @@ try {
   // Continue anyway, as we can run headless without a user data dir
 }
 
+// Check if running in Cloud Run
+const isCloudRun = process.env.K_SERVICE ? true : false;
+
 // Configuration
 const CONFIG = {
   // Scraping settings
   category: 'furniture',      // Category to scrape
-  maxPages: 4000,             // Maximum pages to scrape
+  maxPages: 3,                // Maximum pages to scrape (reduced default to 3)
   startPage: 1,               // Page to start from (useful for resuming)
   
   // Browser settings
-  userDataDir: tempDir,
-  headless: true,             // Running headless in production
+  userDataDir: isCloudRun ? null : tempDir,
+  headless: true,             // Always headless in production
   
   // Storage settings
   gcsEnabled: true,           // Enable Google Cloud Storage
-  gcsBucket: process.env.STORAGE_BUCKET || 'invaluable-data',
+  gcsBucket: process.env.STORAGE_BUCKET || 'invaluable-html-archive',
   batchSize: 100,             // Number of pages per batch file
-  // If using explicit credentials file or object (optional)
-  // gcsCredentials: require('../path/to/credentials.json'), 
   
-  // Rate limiting settings
+  // Rate limiting settings - reduced for better stability
   baseDelay: 1500,            // Base delay between requests
   maxDelay: 4000,             // Maximum delay
   minDelay: 1000,             // Minimum delay in ms
@@ -53,6 +54,17 @@ const CONFIG = {
   checkpointInterval: 5,      // Save checkpoint every N pages
   checkpointDir: path.join(__dirname, '../../temp/checkpoints'),
 };
+
+// Print config without sensitive info
+console.log('∅∅∅');
+for (const [key, value] of Object.entries(CONFIG)) {
+  if (typeof value !== 'object') {
+    console.log(`${key}: ${value},`);
+  } else if (value !== null) {
+    console.log(`${key}: '${value}',`);
+  }
+}
+console.log('∅∅∅');
 
 /**
  * Main scraper function
