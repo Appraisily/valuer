@@ -18,9 +18,9 @@ WORKDIR /usr/src/app
 # Create temp directory for Chrome user data
 RUN mkdir -p temp/chrome-data && chmod -R 777 temp
 
-# Install app dependencies using npm ci for exact versions
+# Install app dependencies
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 # Bundle app source
 COPY . .
