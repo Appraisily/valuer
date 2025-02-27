@@ -171,61 +171,75 @@ router.get('/', async (req, res) => {
         }
       }
       
-      // We need to override the request interceptor in pagination/index.js to save each page
+      // Get references to the original functions we need to modify
       const originalHandlePagination = require('../scrapers/invaluable/pagination').handlePagination;
+      const originalRequestModule = require('../scrapers/invaluable/pagination/request-interceptor');
+      const originalSetupRequestInterception = originalRequestModule.setupRequestInterception;
       
-      // Create a wrapper function that captures each page and saves it
+      // Create a new version that will save each page
       const handlePaginationWithStorage = async (browser, params, firstPageResults, initialCookies, maxPages, config) => {
-        // Get a reference to the original setupRequestInterception function
-        const { setupRequestInterception: originalSetupRequestInterception } = require('../scrapers/invaluable/pagination/request-interceptor');
+        // Store the original function to restore it later
+        const originalSetupInterception = originalRequestModule.setupRequestInterception;
         
-        // Override the setupRequestInterception function to save each page
-        require('../scrapers/invaluable/pagination/request-interceptor').setupRequestInterception = 
-          async (page, navState, pageNum, callback) => {
-            // Call the original function with a new callback that also saves to GCS
-            return await originalSetupRequestInterception(page, navState, pageNum, async (response, status) => {
-              // Call the original callback first if provided
-              if (callback) await callback(response, status);
+        try {
+          // Override the setupRequestInterception function to save each page
+          originalRequestModule.setupRequestInterception = async (page, navState, pageNum, callback) => {
+            console.log(`Setting up interceptor for page ${pageNum}`);
+            
+            // Define a new wrapper callback that saves to GCS
+            const wrappedCallback = async (response, status) => {
+              // First call the original callback if provided
+              if (callback) {
+                await callback(response, status);
+              }
               
-              // Then save the response if it's valid and GCS saving is enabled
+              // Then save the response to GCS if enabled and valid
               if (saveToGcs && response && status === 200 && response.results && response.results[0]?.hits) {
                 try {
-                  // Make sure we have a valid page number from the response or use the supplied pageNum
-                  const currentPage = response.results[0]?.meta?.page || pageNum;
-                  console.log(`🔄 Saving page ${currentPage} results to GCS for category: ${category}`);
-                  const gcsPath = await searchStorage.savePageResults(category, currentPage, response);
-                  console.log(`✅ Saved page ${currentPage} results to GCS at: ${gcsPath}`);
+                  // Determine the actual page number from the response or use the supplied pageNum
+                  const actualPage = (response.results[0]?.meta?.page) || pageNum;
+                  console.log(`🔄 Saving page ${actualPage} results to GCS for category: ${category}`);
+                  const gcsPath = await searchStorage.savePageResults(category, actualPage, response);
+                  console.log(`✅ Saved page ${actualPage} results to GCS at: ${gcsPath}`);
                 } catch (error) {
                   console.error(`❌ Error saving page ${pageNum} results to GCS: ${error.message}`);
                 }
+              } else if (saveToGcs && (!response || status !== 200)) {
+                console.error(`❌ Not saving page ${pageNum} - Invalid response or status: ${status}`);
               }
-            });
+            };
+            
+            // Call the original function with our wrapped callback
+            return await originalSetupInterception(page, navState, pageNum, wrappedCallback);
           };
-        
-        try {
-          // Call the original handlePagination with our modified setupRequestInterception
+          
+          // Now call the original handlePagination with our modified request interceptor
           const results = await originalHandlePagination(browser, params, firstPageResults, initialCookies, maxPages, config);
-          
-          // Restore the original function
-          require('../scrapers/invaluable/pagination/request-interceptor').setupRequestInterception = originalSetupRequestInterception;
-          
           return results;
-        } catch (error) {
-          // Ensure the original function is restored even if there's an error
-          require('../scrapers/invaluable/pagination/request-interceptor').setupRequestInterception = originalSetupRequestInterception;
-          throw error;
+        } finally {
+          // Always restore the original function when done
+          originalRequestModule.setupRequestInterception = originalSetupInterception;
         }
       };
       
-      // Replace the original function with our wrapper
-      require('../scrapers/invaluable/pagination').handlePagination = handlePaginationWithStorage;
-      
-      // Now run the search with all pages
+      // Use our enhanced pagination handler
       try {
-        result = await invaluableScraper.searchAllPages(searchParams, cookies, maxPages);
-      } finally {
-        // Restore the original function when done
-        require('../scrapers/invaluable/pagination').handlePagination = originalHandlePagination;
+        result = await invaluableScraper.searchAllPages(
+          searchParams, 
+          cookies, 
+          maxPages, 
+          null, 
+          handlePaginationWithStorage // Pass our enhanced handler
+        );
+      } catch (error) {
+        console.error('Error during pagination with storage:', error);
+        // If we got first page results, return those instead of failing completely
+        if (firstPageResult) {
+          console.log('Returning first page results due to pagination error');
+          result = firstPageResult;
+        } else {
+          throw error;
+        }
       }
     } else {
       // Single page search
