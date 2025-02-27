@@ -12,6 +12,14 @@ This API provides a simple interface to search Invaluable's catalog by:
 - Supporting all Invaluable search parameters
 - **Paginating through multiple pages of results**
 
+## Performance Improvements
+
+This version includes significant performance improvements:
+- **Updated Dependencies**: Using latest Puppeteer (v22.8.2+) for faster execution
+- **Optimized Docker Build**: Multi-stage builds with proper layer caching
+- **Improved Browser Management**: Better memory usage and stability
+- **Enhanced Error Handling**: More resilient to transient issues
+
 ## Features
 
 ### Core Functionality
@@ -200,6 +208,15 @@ docker run -p 8080:8080 \
   invaluable-search-api
 ```
 
+### Docker Build Optimization
+
+The Dockerfile has been optimized for faster builds:
+- Using Node 20 slim image
+- Properly cleaning up apt cache
+- Using npm ci instead of npm install
+- Better layer caching
+- Running as non-root user for security
+
 ### Google Cloud Run
 
 Deploy using Cloud Build:
@@ -237,27 +254,37 @@ The system handles various error scenarios:
 
 ## Testing Pagination
 
-To test pagination across multiple pages, use the following commands:
+To test pagination across multiple pages, use the following CURL commands:
 
 ### Test First Page
 ```bash
-curl "http://localhost:8080/api/search?query=antique&supercategoryName=Furniture"
+curl "https://valuer-dev-856401495068.us-central1.run.app/api/search?query=antique&supercategoryName=Furniture"
 ```
 
 ### Test Second Page
 ```bash
-curl "http://localhost:8080/api/search?query=antique&supercategoryName=Furniture&page=2"
+curl "https://valuer-dev-856401495068.us-central1.run.app/api/search?query=antique&supercategoryName=Furniture&page=2"
 ```
 
 ### Test Third Page
 ```bash
-curl "http://localhost:8080/api/search?query=antique&supercategoryName=Furniture&page=3"
+curl "https://valuer-dev-856401495068.us-central1.run.app/api/search?query=antique&supercategoryName=Furniture&page=3"
 ```
 
 ### Fetch Three Pages Automatically
 ```bash
-curl "http://localhost:8080/api/search?query=antique&supercategoryName=Furniture&fetchAllPages=true&maxPages=3"
+curl "https://valuer-dev-856401495068.us-central1.run.app/api/search?query=antique&supercategoryName=Furniture&fetchAllPages=true&maxPages=3"
 ```
+
+## Performance Troubleshooting
+
+If you're experiencing slow Docker builds:
+
+1. Use the provided optimized Dockerfile
+2. Ensure your dependencies are up-to-date 
+3. Consider using a better network connection or proxy
+4. Increase Docker resource limits (memory/CPU)
+5. Use proper caching strategies
 
 ## Contributing
 
