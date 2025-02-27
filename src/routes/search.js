@@ -156,9 +156,92 @@ router.get('/', async (req, res) => {
     let result;
     if (fetchAllPages) {
       console.log(`Fetching all pages (up to ${maxPages})`);
-      result = await invaluableScraper.searchAllPages(searchParams, cookies, maxPages);
+      
+      // First, get the first page of results
+      const firstPageResult = await invaluableScraper.search(searchParams, cookies);
+      
+      // Save the first page if enabled
+      if (saveToGcs && firstPageResult) {
+        try {
+          console.log(`Saving first page results to GCS for category: ${category}, page: 1`);
+          const gcsPath = await searchStorage.savePageResults(category, 1, firstPageResult);
+          console.log(`Saved first page results to GCS at: ${gcsPath}`);
+        } catch (error) {
+          console.error('Error saving first page results to GCS:', error);
+        }
+      }
+      
+      // Hook into the pagination process to save each page
+      const originalHandlePagination = require('../scrapers/invaluable/pagination').handlePagination;
+      
+      // Create a wrapper function that captures each page and saves it
+      const handlePaginationWithStorage = async (browser, params, firstPageResults, initialCookies, maxPages, config) => {
+        // Set up request interceptor to capture and save each page
+        const originalSetupRequestInterception = require('../scrapers/invaluable/pagination/request-interceptor').setupRequestInterception;
+        const { setupRequestInterception } = require('../scrapers/invaluable/pagination/request-interceptor');
+        
+        // Store the original function
+        require('../scrapers/invaluable/pagination/request-interceptor').setupRequestInterception = 
+          async (page, navState, pageNum, callback) => {
+            // Call the original function with an enhanced callback
+            return originalSetupRequestInterception(page, navState, pageNum, async (response, status) => {
+              // Process with the original callback first
+              if (callback) await callback(response, status);
+              
+              // Then save the response if it's a valid page result and GCS saving is enabled
+              if (saveToGcs && response && response.results && response.results[0]?.hits) {
+                try {
+                  // Extract the current page number from the response
+                  const currentPage = response.results[0]?.meta?.page || pageNum;
+                  console.log(`Saving page ${currentPage} results to GCS for category: ${category}`);
+                  const gcsPath = await searchStorage.savePageResults(category, currentPage, response);
+                  console.log(`Saved page ${currentPage} results to GCS at: ${gcsPath}`);
+                } catch (error) {
+                  console.error(`Error saving page results to GCS: ${error.message}`);
+                }
+              }
+            });
+          };
+          
+        try {
+          // Call the original function
+          const results = await originalHandlePagination(browser, params, firstPageResults, initialCookies, maxPages, config);
+          
+          // Restore the original function
+          require('../scrapers/invaluable/pagination/request-interceptor').setupRequestInterception = originalSetupRequestInterception;
+          
+          return results;
+        } catch (error) {
+          // Ensure the original function is restored even if there's an error
+          require('../scrapers/invaluable/pagination/request-interceptor').setupRequestInterception = originalSetupRequestInterception;
+          throw error;
+        }
+      };
+      
+      // Replace the original function with our wrapper
+      require('../scrapers/invaluable/pagination').handlePagination = handlePaginationWithStorage;
+      
+      // Now run the search with all pages
+      try {
+        result = await invaluableScraper.searchAllPages(searchParams, cookies, maxPages);
+      } finally {
+        // Restore the original function when done
+        require('../scrapers/invaluable/pagination').handlePagination = originalHandlePagination;
+      }
     } else {
+      // Single page search
       result = await invaluableScraper.search(searchParams, cookies);
+      
+      // Save the single page if enabled
+      if (saveToGcs && result) {
+        try {
+          console.log(`Saving search results to GCS for category: ${category}, page: 1`);
+          const gcsPath = await searchStorage.savePageResults(category, 1, result);
+          console.log(`Saved search results to GCS at: ${gcsPath}`);
+        } catch (error) {
+          console.error('Error saving search results to GCS:', error);
+        }
+      }
     }
     
     if (!result) {
@@ -174,21 +257,6 @@ router.get('/', async (req, res) => {
     // Log pagination information
     if (formattedResults.pagination) {
       console.log(`Search found ${formattedResults.pagination.totalItems} total items across ${formattedResults.pagination.totalPages} pages`);
-    }
-    
-    // Save to GCS if enabled
-    if (saveToGcs) {
-      try {
-        const currentPage = formattedResults.pagination?.currentPage || 1;
-        console.log(`Saving search results to GCS for category: ${category}, page: ${currentPage}`);
-        
-        // Store the raw results in GCS
-        const gcsPath = await searchStorage.savePageResults(category, currentPage, result);
-        console.log(`Saved search results to GCS at: ${gcsPath}`);
-      } catch (error) {
-        console.error('Error saving search results to GCS:', error);
-        // Continue with response even if storage fails
-      }
     }
     
     res.json(standardizeResponse(formattedResults, {
