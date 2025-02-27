@@ -7,7 +7,11 @@
     "start": "node src/server.js",
     "start:scraper": "node src/examples/invaluable-category-scraper.js",
     "test:gcs": "node src/examples/test-gcs-scraper.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "scrape:furniture": "node src/scripts/resumable-scraper.js --category=furniture --maxRuntime=55 --batchSize=50",
+    "scrape:art": "node src/scripts/resumable-scraper.js --category=fine-art --maxRuntime=55 --batchSize=50",
+    "scrape:jewelry": "node src/scripts/resumable-scraper.js --category=jewelry --maxRuntime=55 --batchSize=50",
+    "scrape:custom": "node src/scripts/resumable-scraper.js"
   },
   "dependencies": {
     "@google-cloud/storage": "^6.10.1",
