@@ -21,109 +21,132 @@ const COMMON_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 };
 
+// Utility functions for logging
+const getTimestamp = () => new Date().toISOString();
+const formatElapsedTime = (startTime) => {
+  const elapsed = Date.now() - startTime;
+  if (elapsed < 1000) return `${elapsed}ms`;
+  if (elapsed < 60000) return `${(elapsed/1000).toFixed(2)}s`;
+  return `${(elapsed/60000).toFixed(2)}min`;
+};
+
 /**
  * Configura la interceptación de solicitudes para la paginación
  * @param {Object} page - Instancia de la página
  * @param {Object} navState - Estado de navegación actual
  * @param {number} pageNum - Número de página actual
  * @param {Function} onApiResponse - Callback para manejar respuestas API
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>} - Estado de éxito
  */
 async function setupRequestInterception(page, navState, pageNum, onApiResponse) {
-  await page.setRequestInterception(true);
+  console.log(`[${getTimestamp()}] 🔍 Setting up request interception for page ${pageNum}`);
+  const startTime = Date.now();
   
-  page.on('request', async (req) => {
-    const url = req.url();
+  try {
+    await page.setRequestInterception(true);
     
-    // Solo interceptar solicitudes a invaluable.com
-    if (url.includes('invaluable.com')) {
-      // Para solicitudes a la API, modificar o ajustar según sea necesario
-      if (url.includes(CAT_RESULTS_ENDPOINT) || url.includes(SESSION_INFO_ENDPOINT)) {
-        console.log(`📤 Solicitud interceptada a ${url}`);
+    // Clear any existing listeners
+    await page.removeAllListeners('request');
+    
+    // Set up the request listener
+    page.on('request', async (request) => {
+      const url = request.url();
+      
+      // Skip non-fetch requests
+      if (request.resourceType() !== 'fetch') {
+        request.continue();
+        return;
+      }
+      
+      // Log API requests
+      if (url.includes(CAT_RESULTS_ENDPOINT)) {
+        console.log(`[${getTimestamp()}] 📡 Intercepted results API request for page ${pageNum}`);
         
-        // Si tenemos cookies, añadirlas a la solicitud
-        if (navState.cookies && navState.cookies.length > 0) {
-          const headers = {
-            ...req.headers(),
-            'Cookie': navState.cookies.map(c => `${c.name}=${c.value}`).join('; ')
-          };
-          
-          // Continuar con los headers modificados
-          req.continue({ headers });
+        // Get request body and modify for page
+        const requestBody = request.postData();
+        if (requestBody) {
+          try {
+            const requestStartTime = Date.now();
+            console.log(`[${getTimestamp()}] 🔄 Processing API request for page ${pageNum}`);
+            
+            // Continue with the request
+            request.continue();
+            
+            // Wait for the response
+            const [response] = await Promise.all([
+              page.waitForResponse(res => res.url().includes(CAT_RESULTS_ENDPOINT)),
+              page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 }).catch(() => {})
+            ]);
+            
+            if (response) {
+              console.log(`[${getTimestamp()}] ✅ Received API response for page ${pageNum} (status ${response.status()})`);
+              
+              try {
+                const jsonResponse = await response.json();
+                navState.lastResponse = jsonResponse;
+                
+                // Extract result statistics
+                const hits = jsonResponse?.results?.[0]?.hits || [];
+                const meta = jsonResponse?.results?.[0]?.meta || {};
+                
+                console.log(`[${getTimestamp()}] 📊 Page ${pageNum} results: ${hits.length} hits, page ${meta.page || pageNum} of ${Math.ceil((meta.totalHits || 0) / (meta.hitsPerPage || 96))}`);
+                
+                // Extraer parámetros de navegación de la respuesta
+                const extractedParams = extractFromApiResponse(jsonResponse);
+                
+                // Actualizar el estado de navegación con los parámetros extraídos
+                if (extractedParams.refId) navState.refId = extractedParams.refId;
+                if (extractedParams.searchContext) navState.searchContext = extractedParams.searchContext;
+                if (extractedParams.searcher) navState.searcher = extractedParams.searcher;
+                
+                // Llamar al callback con la respuesta JSON
+                if (onApiResponse) {
+                  await onApiResponse(jsonResponse, response.status());
+                }
+                
+                // Log timing information
+                const requestElapsed = Date.now() - requestStartTime;
+                console.log(`[${getTimestamp()}] ⏱️ API request processed in ${formatElapsedTime(requestStartTime)} (${requestElapsed}ms)`);
+              } catch (error) {
+                console.error(`[${getTimestamp()}] ❌ Error parsing API response for page ${pageNum}: ${error.message}`);
+                navState.lastResponse = null;
+                
+                if (onApiResponse) {
+                  await onApiResponse(null, response.status());
+                }
+              }
+            } else {
+              console.error(`[${getTimestamp()}] ❌ No API response received for page ${pageNum}`);
+              navState.lastResponse = null;
+              
+              if (onApiResponse) {
+                await onApiResponse(null, 0);
+              }
+            }
+          } catch (error) {
+            console.error(`[${getTimestamp()}] ❌ Error processing request: ${error.message}`);
+            request.continue();
+          }
         } else {
-          // Continuar normalmente
-          req.continue();
+          console.log(`[${getTimestamp()}] ⚠️ No request body found for page ${pageNum}`);
+          request.continue();
         }
       } else if (url.includes('/dist/') || url.includes('/static/')) {
         // Bloquear recursos estáticos para mejorar rendimiento
-        req.abort();
+        request.abort();
       } else {
         // Otras solicitudes a invaluable.com continúan normalmente
-        req.continue();
+        request.continue();
       }
-    } else {
-      // Todas las solicitudes que no son a invaluable.com
-      req.continue();
-    }
-  });
-  
-  // Capturar las respuestas
-  page.on('response', async (response) => {
-    const url = response.url();
-    const status = response.status();
-    const headers = response.headers();
-    const contentType = headers['content-type'] || '';
+    });
     
-    // Solo procesar respuestas JSON de invaluable.com
-    if (url.includes('invaluable.com') && contentType.includes('application/json')) {
-      try {
-        const text = await response.text();
-        
-        // Intenta parsear la respuesta como JSON
-        try {
-          const json = JSON.parse(text);
-          console.log(`📥 Respuesta JSON de ${url} (${status})`);
-          
-          // Si es una respuesta de los endpoints que nos interesan
-          if (url.includes(CAT_RESULTS_ENDPOINT)) {
-            console.log(`Respuesta de catResults para página ${pageNum} recibida (${status})`);
-            
-            if (status === 200) {
-              // Extraer parámetros de navegación de la respuesta
-              const extractedParams = extractFromApiResponse(json);
-              
-              // Actualizar el estado de navegación con los parámetros extraídos
-              if (extractedParams.refId) navState.refId = extractedParams.refId;
-              if (extractedParams.searchContext) navState.searchContext = extractedParams.searchContext;
-              if (extractedParams.searcher) navState.searcher = extractedParams.searcher;
-              
-              // Llamar al callback con la respuesta JSON
-              if (onApiResponse) {
-                onApiResponse(json, status);
-              }
-            } else {
-              console.error(`Error al obtener resultados (${status}): ${text}`);
-            }
-          } else if (url.includes(SESSION_INFO_ENDPOINT)) {
-            console.log(`Respuesta de session-info para página ${pageNum} recibida (${status})`);
-            
-            if (status === 200) {
-              // Intentar extraer refId y searchContext de la respuesta
-              const extractedParams = extractFromApiResponse(json);
-              
-              // Actualizar el estado de navegación con los parámetros extraídos
-              if (extractedParams.refId && !navState.refId) navState.refId = extractedParams.refId;
-              if (extractedParams.searchContext && !navState.searchContext) navState.searchContext = extractedParams.searchContext;
-            }
-          }
-        } catch (error) {
-          console.error(`Error al parsear respuesta JSON: ${error.message}`);
-        }
-      } catch (err) {
-        console.error(`Error al leer respuesta: ${err.message}`);
-      }
-    }
-  });
+    const elapsed = Date.now() - startTime;
+    console.log(`[${getTimestamp()}] ✅ Request interception setup completed in ${formatElapsedTime(startTime)} (${elapsed}ms)`);
+    return true;
+  } catch (error) {
+    console.error(`[${getTimestamp()}] ❌ Error setting up request interception: ${error.message}`);
+    return false;
+  }
 }
 
 /**

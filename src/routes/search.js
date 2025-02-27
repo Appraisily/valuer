@@ -92,6 +92,19 @@ function standardizeResponse(data, parameters = {}) {
   };
 }
 
+// Get timestamp for logging
+function getTimestamp() {
+  return new Date().toISOString();
+}
+
+// Format elapsed time in ms to human-readable format
+function formatElapsedTime(startTime) {
+  const elapsed = Date.now() - startTime;
+  if (elapsed < 1000) return `${elapsed}ms`;
+  if (elapsed < 60000) return `${(elapsed/1000).toFixed(2)}s`;
+  return `${(elapsed/60000).toFixed(2)}min`;
+}
+
 // Search endpoint
 router.get('/', async (req, res) => {
   try {
@@ -100,94 +113,105 @@ router.get('/', async (req, res) => {
       throw new Error('Scraper not initialized');
     }
 
-    // Check for direct API data in request
-    if (req.query.directApiData) {
-      try {
-        console.log('Using direct API data provided in request');
-        const apiData = JSON.parse(req.query.directApiData);
-        const formattedResults = formatSearchResults(apiData);
-        return res.json(standardizeResponse(formattedResults, req.query));
-      } catch (error) {
-        console.error('Error parsing direct API data:', error);
-        // Continue with normal scraping if direct data parsing fails
-      }
-    }
+    // Start timing the request
+    const requestStartTime = Date.now();
+    console.log(`[${getTimestamp()}] 🔍 Search request received: ${JSON.stringify(req.query)}`);
 
-    // Use cookies from request if provided
-    const cookies = req.query.cookies ? 
-      JSON.parse(req.query.cookies) : 
-      [
-        {
-          name: 'AZTOKEN-PROD',
-          value: req.query.aztoken || '4F562873-F229-4346-A846-37E9A451FA9E',
-          domain: '.invaluable.com'
-        },
-        {
-          name: 'cf_clearance',
-          value: req.query.cf_clearance || 'Yq4QHU.y14z93vU3CmLCK80CU7Pq6pgupmW0eM8k548-1738320515-1.2.1.1-ZFXBFgIPHghfvwwfhRbZx27.6zPihqfQ4vGP0VY1v66mKc.wwAOVRiRJhK6ouVt_.wMB30bkeY0r9NK.KUTU4gu7GzZxbyh0EH_gE36kcnHDvGATrI_vFs9y1XHq3PgtlHmBUflqgjcS6x9MC5YpXoeELPYiT0k59IPMn..1cHED7zV6T78hILKinjM6hZ.ZeQwetIN6SPmuvXb7V2z2ddJa64Vg_zUi.euce0SjjJr5ti7tHWoFsTV1DO1MkFwDfUpy1yTCdESho.EwyRgfdfRAlx6njkTmlWNkp1aXcXU',
-          domain: '.invaluable.com'
-        }
-      ];
-
-    // Create clean query params object by removing our special parameters
-    const searchParams = {...req.query};
-    delete searchParams.directApiData;
-    delete searchParams.cookies;
-    delete searchParams.aztoken;
-    delete searchParams.cf_clearance;
+    // Extract search parameters
+    const searchParams = { ...req.query };
+    const fetchAllPages = searchParams.fetchAllPages === 'true';
+    const maxPages = parseInt(searchParams.maxPages) || 10;
     
-    // Check if we should fetch all pages
-    const fetchAllPages = req.query.fetchAllPages === 'true';
+    // Remove pagination parameters from search params to avoid confusion
     delete searchParams.fetchAllPages;
-    
-    // Get max pages to fetch if specified
-    const maxPages = parseInt(req.query.maxPages) || 10;
     delete searchParams.maxPages;
     
-    // Check if we should save to GCS
-    const saveToGcs = req.query.saveToGcs === 'true';
-    delete searchParams.saveToGcs;
+    // Extract cookies
+    const cookiesParam = req.query.cookies || req.headers['x-invaluable-cookies'];
+    let cookies = [];
     
-    // Get category/search term for storage
-    const category = searchParams.query || 'uncategorized';
-
-    console.log('Starting search with parameters:', searchParams);
+    if (cookiesParam) {
+      try {
+        cookies = typeof cookiesParam === 'string' ? JSON.parse(cookiesParam) : cookiesParam;
+      } catch (error) {
+        console.error(`[${getTimestamp()}] ❌ Error parsing cookies:`, error);
+      }
+    }
     
-    let result;
-    if (fetchAllPages) {
-      console.log(`Fetching all pages (up to ${maxPages})`);
+    // Determine if we should save results to GCS
+    const saveToGcs = searchParams.saveToGcs === 'true';
+    const category = searchParams.supercategoryName || searchParams.keyword || searchParams.query || 'general';
+    
+    // If user provided a specific page parameter, handle that specially
+    const requestedPage = searchParams.page ? parseInt(searchParams.page) : null;
+    
+    // Log search configuration
+    console.log(`[${getTimestamp()}] 🚀 Starting search with configuration:`);
+    console.log(`[${getTimestamp()}] - Query: ${searchParams.query || 'N/A'}`);
+    console.log(`[${getTimestamp()}] - Category: ${category}`);
+    console.log(`[${getTimestamp()}] - Fetch all pages: ${fetchAllPages}`);
+    console.log(`[${getTimestamp()}] - Max pages: ${maxPages}`);
+    console.log(`[${getTimestamp()}] - Save to GCS: ${saveToGcs}`);
+    console.log(`[${getTimestamp()}] - Specific page: ${requestedPage || 'none'}`);
+    
+    let result = null;
+    
+    // Simple path: If this is a single page request or a specific page is requested
+    if (!fetchAllPages || requestedPage) {
+      console.log(`[${getTimestamp()}] 📄 Performing single page search ${requestedPage ? `for page ${requestedPage}` : ''}`);
+      const singlePageStartTime = Date.now();
       
-      // First, get the first page of results
-      const firstPageResult = await invaluableScraper.search(searchParams, cookies);
+      // Execute the single page search
+      result = await invaluableScraper.search(searchParams, cookies);
       
-      // Save the first page if enabled
-      if (saveToGcs && firstPageResult) {
+      console.log(`[${getTimestamp()}] ✅ Single page search completed in ${formatElapsedTime(singlePageStartTime)}`);
+      
+      // Save the result to GCS if enabled
+      if (saveToGcs && result) {
         try {
-          console.log(`Saving first page results to GCS for category: ${category}, page: 1`);
-          const gcsPath = await searchStorage.savePageResults(category, 1, firstPageResult);
-          console.log(`Saved first page results to GCS at: ${gcsPath}`);
+          const pageNum = requestedPage || 1;
+          console.log(`[${getTimestamp()}] 💾 Saving search results to GCS for category: ${category}, page: ${pageNum}`);
+          const gcsPath = await searchStorage.savePageResults(category, pageNum, result);
+          console.log(`[${getTimestamp()}] ✅ Saved search results to GCS at: ${gcsPath}`);
         } catch (error) {
-          console.error('Error saving first page results to GCS:', error);
+          console.error(`[${getTimestamp()}] ❌ Error saving search results to GCS:`, error);
         }
       }
+    } 
+    // Multi-page path: If fetchAllPages is true and no specific page is requested
+    else {
+      console.log(`[${getTimestamp()}] 📚 Starting multi-page search with up to ${maxPages} pages`);
+      const multiPageStartTime = Date.now();
       
-      // Get references to the original functions we need to modify
-      const originalHandlePagination = require('../scrapers/invaluable/pagination').handlePagination;
+      // Get references to the original pagination function
+      const { handlePagination } = require('../scrapers/invaluable/pagination');
       const originalRequestModule = require('../scrapers/invaluable/pagination/request-interceptor');
-      const originalSetupRequestInterception = originalRequestModule.setupRequestInterception;
       
-      // Create a new version that will save each page
+      // Create enhanced pagination handler with storage capability
       const handlePaginationWithStorage = async (browser, params, firstPageResults, initialCookies, maxPages, config) => {
-        // Store the original function to restore it later
+        // Store original function to restore later
         const originalSetupInterception = originalRequestModule.setupRequestInterception;
         
+        // For tracking
+        const paginationStartTime = Date.now();
+        const pagesStartTimes = {};
+        const pagesElapsedTimes = {};
+        let totalSuccessPages = 0;
+        let totalFailedPages = 0;
+        
+        console.log(`[${getTimestamp()}] 📚 Beginning pagination process for up to ${maxPages} pages`);
+        
         try {
-          // Override the setupRequestInterception function to save each page
+          // Override the setupRequestInterception function to add GCS saving capability
           originalRequestModule.setupRequestInterception = async (page, navState, pageNum, callback) => {
-            console.log(`Setting up interceptor for page ${pageNum}`);
+            console.log(`[${getTimestamp()}] 🔄 Setting up interceptor for page ${pageNum}`);
+            pagesStartTimes[pageNum] = Date.now();
             
             // Define a new wrapper callback that saves to GCS
             const wrappedCallback = async (response, status) => {
+              const pageElapsed = Date.now() - pagesStartTimes[pageNum];
+              pagesElapsedTimes[pageNum] = pageElapsed;
+              
               // First call the original callback if provided
               if (callback) {
                 await callback(response, status);
@@ -198,14 +222,26 @@ router.get('/', async (req, res) => {
                 try {
                   // Determine the actual page number from the response or use the supplied pageNum
                   const actualPage = (response.results[0]?.meta?.page) || pageNum;
-                  console.log(`🔄 Saving page ${actualPage} results to GCS for category: ${category}`);
+                  console.log(`[${getTimestamp()}] 💾 Saving page ${actualPage} results to GCS for category: ${category}`);
                   const gcsPath = await searchStorage.savePageResults(category, actualPage, response);
-                  console.log(`✅ Saved page ${actualPage} results to GCS at: ${gcsPath}`);
+                  console.log(`[${getTimestamp()}] ✅ Saved page ${actualPage} to GCS at: ${gcsPath} (in ${formatElapsedTime(pagesStartTimes[pageNum])})`);
                 } catch (error) {
-                  console.error(`❌ Error saving page ${pageNum} results to GCS: ${error.message}`);
+                  console.error(`[${getTimestamp()}] ❌ Error saving page ${pageNum} results to GCS: ${error.message}`);
+                  totalFailedPages++;
                 }
               } else if (saveToGcs && (!response || status !== 200)) {
-                console.error(`❌ Not saving page ${pageNum} - Invalid response or status: ${status}`);
+                console.error(`[${getTimestamp()}] ❌ Not saving page ${pageNum} - Invalid response or status: ${status}`);
+                totalFailedPages++;
+              }
+              
+              // Log successful page fetch
+              if (response && status === 200 && response.results && response.results[0]?.hits) {
+                const hitCount = response.results[0]?.hits?.length || 0;
+                totalSuccessPages++;
+                console.log(`[${getTimestamp()}] ✅ Page ${pageNum} fetched successfully in ${formatElapsedTime(pagesStartTimes[pageNum])} with ${hitCount} items`);
+              } else {
+                console.error(`[${getTimestamp()}] ❌ Page ${pageNum} failed with status: ${status}`);
+                totalFailedPages++;
               }
             };
             
@@ -213,8 +249,22 @@ router.get('/', async (req, res) => {
             return await originalSetupInterception(page, navState, pageNum, wrappedCallback);
           };
           
-          // Now call the original handlePagination with our modified request interceptor
-          const results = await originalHandlePagination(browser, params, firstPageResults, initialCookies, maxPages, config);
+          // Call the original handlePagination with our modified request interceptor
+          console.log(`[${getTimestamp()}] 🔄 Starting pagination handler with ${maxPages} max pages`);
+          const results = await handlePagination(browser, params, firstPageResults, initialCookies, maxPages, config);
+          
+          // Log pagination completion
+          const paginationElapsed = Date.now() - paginationStartTime;
+          console.log(`[${getTimestamp()}] 🏁 Pagination completed in ${formatElapsedTime(paginationStartTime)}`);
+          console.log(`[${getTimestamp()}] 📊 Pages stats: ${totalSuccessPages} successful, ${totalFailedPages} failed`);
+          
+          // Calculate average page time
+          const pageTimeValues = Object.values(pagesElapsedTimes);
+          if (pageTimeValues.length > 0) {
+            const avgPageTime = pageTimeValues.reduce((sum, time) => sum + time, 0) / pageTimeValues.length;
+            console.log(`[${getTimestamp()}] ⏱️ Average page fetch time: ${formatElapsedTime(Date.now() - avgPageTime)}`);
+          }
+          
           return results;
         } finally {
           // Always restore the original function when done
@@ -222,42 +272,24 @@ router.get('/', async (req, res) => {
         }
       };
       
-      // Use our enhanced pagination handler
       try {
+        // Execute the multi-page search
         result = await invaluableScraper.searchAllPages(
           searchParams, 
           cookies, 
           maxPages, 
-          null, 
           handlePaginationWithStorage // Pass our enhanced handler
         );
+        
+        console.log(`[${getTimestamp()}] ✅ Multi-page search completed in ${formatElapsedTime(multiPageStartTime)}`);
       } catch (error) {
-        console.error('Error during pagination with storage:', error);
-        // If we got first page results, return those instead of failing completely
-        if (firstPageResult) {
-          console.log('Returning first page results due to pagination error');
-          result = firstPageResult;
-        } else {
-          throw error;
-        }
-      }
-    } else {
-      // Single page search
-      result = await invaluableScraper.search(searchParams, cookies);
-      
-      // Save the single page if enabled
-      if (saveToGcs && result) {
-        try {
-          console.log(`Saving search results to GCS for category: ${category}, page: 1`);
-          const gcsPath = await searchStorage.savePageResults(category, 1, result);
-          console.log(`Saved search results to GCS at: ${gcsPath}`);
-        } catch (error) {
-          console.error('Error saving search results to GCS:', error);
-        }
+        console.error(`[${getTimestamp()}] ❌ Error during multi-page search:`, error);
+        throw error;
       }
     }
     
     if (!result) {
+      console.log(`[${getTimestamp()}] ⚠️ No search results found`);
       return res.status(404).json({
         success: false,
         error: 'No search results found',
@@ -268,159 +300,137 @@ router.get('/', async (req, res) => {
     const formattedResults = formatSearchResults(result);
     
     // Log pagination information
-    if (formattedResults.pagination) {
-      console.log(`Search found ${formattedResults.pagination.totalItems} total items across ${formattedResults.pagination.totalPages} pages`);
-    }
+    const totalItems = formattedResults.pagination?.totalItems || 0;
+    const totalPages = formattedResults.pagination?.totalPages || 0;
+    const totalReturned = formattedResults.totalResults || 0;
     
-    res.json(standardizeResponse(formattedResults, {
-      ...searchParams,
-      fetchAllPages: fetchAllPages ? 'true' : 'false',
-      maxPages: maxPages,
-      saveToGcs: saveToGcs ? 'true' : 'false'
-    }));
+    console.log(`[${getTimestamp()}] 📊 Search results stats: ${totalReturned} items returned of ${totalItems} total items (${totalPages} total pages)`);
     
+    // Calculate and log final timing
+    const totalRequestTime = Date.now() - requestStartTime;
+    console.log(`[${getTimestamp()}] 🏁 Request completed in ${formatElapsedTime(requestStartTime)} (${totalRequestTime}ms)`);
+    
+    // Return standard response
+    res.json(standardizeResponse(formattedResults, req.query));
   } catch (error) {
-    console.error('Error in search route:', error);
-    res.status(500).json({ 
+    console.error(`[${getTimestamp()}] ❌ Search error:`, error);
+    
+    res.status(500).json({
       success: false,
       error: 'Failed to fetch search results',
-      message: error.message 
+      message: error.message
     });
   }
 });
 
-// New endpoint to accept direct API data from client-side interception
-router.post('/direct', express.json({ limit: '10mb' }), async (req, res) => {
+// Direct API route to process direct API data
+router.post('/direct', async (req, res) => {
   try {
-    // Validate request
     if (!req.body || !req.body.apiData) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid request',
-        message: 'Request must include apiData field'
+        error: 'Missing required data',
+        message: 'The request must include apiData'
       });
     }
     
-    console.log('Received direct API data submission');
-    const apiData = req.body.apiData;
-    const searchParams = req.body.searchParams || {};
+    // Get the API data and any search parameters
+    const { apiData, searchParams = {} } = req.body;
     
-    // Check if we should save to GCS
-    const saveToGcs = req.body.saveToGcs === true;
-    
-    // Get category/search term for storage
-    const category = searchParams.query || 'uncategorized';
-    
+    // Process the API data
     const formattedResults = formatSearchResults(apiData);
     
-    // Save to GCS if enabled
-    if (saveToGcs) {
-      try {
-        const currentPage = formattedResults.pagination?.currentPage || 1;
-        console.log(`Saving direct API data to GCS for category: ${category}, page: ${currentPage}`);
-        
-        // Store the raw results in GCS
-        const gcsPath = await searchStorage.savePageResults(category, currentPage, apiData);
-        console.log(`Saved direct API data to GCS at: ${gcsPath}`);
-      } catch (error) {
-        console.error('Error saving direct API data to GCS:', error);
-        // Continue with response even if storage fails
-      }
-    }
-    
-    res.json(standardizeResponse(formattedResults, {
-      ...searchParams,
-      saveToGcs: saveToGcs ? 'true' : 'false'
-    }));
-    
+    // Return standard response
+    res.json(standardizeResponse(formattedResults, searchParams));
   } catch (error) {
-    console.error('Error handling direct API data:', error);
-    res.status(500).json({ 
+    console.error(`[${getTimestamp()}] ❌ Error processing direct API data:`, error);
+    
+    res.status(500).json({
       success: false,
       error: 'Failed to process API data',
-      message: error.message 
+      message: error.message
     });
   }
 });
 
-// New endpoint to combine multiple pages of API data
-router.post('/combine-pages', express.json({ limit: '10mb' }), async (req, res) => {
+// Combine pages route to merge multiple page results
+router.post('/combine-pages', async (req, res) => {
   try {
-    // Validate request
-    if (!req.body || !Array.isArray(req.body.pages) || req.body.pages.length === 0) {
+    if (!req.body || !req.body.pages || !Array.isArray(req.body.pages)) {
       return res.status(400).json({
         success: false,
-        error: 'Invalid request',
-        message: 'Request must include a non-empty array of pages'
+        error: 'Missing required data',
+        message: 'The request must include an array of pages'
       });
     }
     
-    console.log(`Combining ${req.body.pages.length} pages of API data`);
-    const pages = req.body.pages;
-    const searchParams = req.body.searchParams || {};
+    const { pages, searchParams = {} } = req.body;
+    console.log(`[${getTimestamp()}] 🔄 Combining ${pages.length} pages`);
     
-    // Check if we should save to GCS
-    const saveToGcs = req.body.saveToGcs === true;
+    // Ensure we have at least one page
+    if (pages.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Empty pages array',
+        message: 'The pages array must contain at least one page of results'
+      });
+    }
     
-    // Get category/search term for storage
-    const category = searchParams.query || 'uncategorized';
+    // Use the first page as a template and add hits from other pages
+    const combinedResult = JSON.parse(JSON.stringify(pages[0]));
     
-    // Use the first page as the base
-    let combinedData = JSON.parse(JSON.stringify(pages[0]));
+    // Ensure we have a valid hits array
+    if (!combinedResult.results || !combinedResult.results[0] || !Array.isArray(combinedResult.results[0].hits)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid page format',
+        message: 'The first page does not have a valid hits array'
+      });
+    }
     
-    // Add hits from other pages
+    // Keep track of unique item IDs to avoid duplicates
+    const processedIds = new Set();
+    
+    // Add all hits from the first page
+    combinedResult.results[0].hits.forEach(hit => {
+      const itemId = hit.lotId || hit.id || JSON.stringify(hit);
+      processedIds.add(itemId);
+    });
+    
+    // Add hits from additional pages
     for (let i = 1; i < pages.length; i++) {
       const page = pages[i];
-      if (page && page.results && page.results[0] && page.results[0].hits) {
-        combinedData.results[0].hits = [
-          ...combinedData.results[0].hits,
-          ...page.results[0].hits
-        ];
-      }
-    }
-    
-    // Update metadata
-    if (combinedData.results && combinedData.results[0]) {
-      const totalItems = combinedData.results[0].hits.length;
-      if (combinedData.results[0].meta) {
-        combinedData.results[0].meta.totalHits = totalItems;
-      }
-    }
-    
-    const formattedResults = formatSearchResults(combinedData);
-    
-    // Save individual pages to GCS if enabled
-    if (saveToGcs) {
-      try {
-        console.log(`Saving ${pages.length} individual page results to GCS for category: ${category}`);
-        
-        // Save each page individually
-        for (let i = 0; i < pages.length; i++) {
-          const page = pages[i];
-          const pageNumber = (page.results?.[0]?.meta?.page) || (i + 1);
+      
+      if (page.results && page.results[0] && Array.isArray(page.results[0].hits)) {
+        page.results[0].hits.forEach(hit => {
+          const itemId = hit.lotId || hit.id || JSON.stringify(hit);
           
-          // Store the raw page results in GCS
-          const gcsPath = await searchStorage.savePageResults(category, pageNumber, page);
-          console.log(`Saved page ${pageNumber} results to GCS at: ${gcsPath}`);
-        }
-      } catch (error) {
-        console.error('Error saving combined pages to GCS:', error);
-        // Continue with response even if storage fails
+          // Only add if we haven't seen this ID before
+          if (!processedIds.has(itemId)) {
+            combinedResult.results[0].hits.push(hit);
+            processedIds.add(itemId);
+          }
+        });
       }
     }
     
-    res.json(standardizeResponse(formattedResults, {
-      ...searchParams,
-      saveToGcs: saveToGcs ? 'true' : 'false',
-      combinedPages: pages.length
-    }));
+    // Update total hits metadata
+    if (combinedResult.results[0].meta) {
+      combinedResult.results[0].meta.totalHits = combinedResult.results[0].hits.length;
+    }
     
+    console.log(`[${getTimestamp()}] ✅ Combined ${pages.length} pages with ${combinedResult.results[0].hits.length} total unique hits`);
+    
+    // Format and return the combined results
+    const formattedResults = formatSearchResults(combinedResult);
+    res.json(standardizeResponse(formattedResults, searchParams));
   } catch (error) {
-    console.error('Error combining API data pages:', error);
-    res.status(500).json({ 
+    console.error(`[${getTimestamp()}] ❌ Error combining pages:`, error);
+    
+    res.status(500).json({
       success: false,
-      error: 'Failed to combine API data pages',
-      message: error.message 
+      error: 'Failed to combine pages',
+      message: error.message
     });
   }
 });
