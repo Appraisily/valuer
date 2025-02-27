@@ -171,40 +171,39 @@ router.get('/', async (req, res) => {
         }
       }
       
-      // Hook into the pagination process to save each page
+      // We need to override the request interceptor in pagination/index.js to save each page
       const originalHandlePagination = require('../scrapers/invaluable/pagination').handlePagination;
       
       // Create a wrapper function that captures each page and saves it
       const handlePaginationWithStorage = async (browser, params, firstPageResults, initialCookies, maxPages, config) => {
-        // Set up request interceptor to capture and save each page
-        const originalSetupRequestInterception = require('../scrapers/invaluable/pagination/request-interceptor').setupRequestInterception;
-        const { setupRequestInterception } = require('../scrapers/invaluable/pagination/request-interceptor');
+        // Get a reference to the original setupRequestInterception function
+        const { setupRequestInterception: originalSetupRequestInterception } = require('../scrapers/invaluable/pagination/request-interceptor');
         
-        // Store the original function
+        // Override the setupRequestInterception function to save each page
         require('../scrapers/invaluable/pagination/request-interceptor').setupRequestInterception = 
           async (page, navState, pageNum, callback) => {
-            // Call the original function with an enhanced callback
-            return originalSetupRequestInterception(page, navState, pageNum, async (response, status) => {
-              // Process with the original callback first
+            // Call the original function with a new callback that also saves to GCS
+            return await originalSetupRequestInterception(page, navState, pageNum, async (response, status) => {
+              // Call the original callback first if provided
               if (callback) await callback(response, status);
               
-              // Then save the response if it's a valid page result and GCS saving is enabled
-              if (saveToGcs && response && response.results && response.results[0]?.hits) {
+              // Then save the response if it's valid and GCS saving is enabled
+              if (saveToGcs && response && status === 200 && response.results && response.results[0]?.hits) {
                 try {
-                  // Extract the current page number from the response
+                  // Make sure we have a valid page number from the response or use the supplied pageNum
                   const currentPage = response.results[0]?.meta?.page || pageNum;
-                  console.log(`Saving page ${currentPage} results to GCS for category: ${category}`);
+                  console.log(`🔄 Saving page ${currentPage} results to GCS for category: ${category}`);
                   const gcsPath = await searchStorage.savePageResults(category, currentPage, response);
-                  console.log(`Saved page ${currentPage} results to GCS at: ${gcsPath}`);
+                  console.log(`✅ Saved page ${currentPage} results to GCS at: ${gcsPath}`);
                 } catch (error) {
-                  console.error(`Error saving page results to GCS: ${error.message}`);
+                  console.error(`❌ Error saving page ${pageNum} results to GCS: ${error.message}`);
                 }
               }
             });
           };
-          
+        
         try {
-          // Call the original function
+          // Call the original handlePagination with our modified setupRequestInterception
           const results = await originalHandlePagination(browser, params, firstPageResults, initialCookies, maxPages, config);
           
           // Restore the original function
