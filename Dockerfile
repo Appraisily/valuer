@@ -15,9 +15,6 @@ RUN apt-get update && apt-get install -y \
 # Create app directory
 WORKDIR /usr/src/app
 
-# Create temp directory for Chrome user data
-RUN mkdir -p temp/chrome-data && chmod -R 777 temp
-
 # Install app dependencies
 COPY package*.json ./
 RUN npm install
@@ -26,7 +23,7 @@ RUN npm install
 COPY . .
 
 # Expose port
-EXPOSE 8080
+EXPOSE 3000
 
 # Start the application
 CMD [ "npm", "start" ]
