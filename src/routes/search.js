@@ -1,5 +1,9 @@
 const express = require('express');
 const router = express.Router();
+const SearchStorageService = require('../utils/search-storage');
+
+// Initialize SearchStorageService
+const searchStorage = new SearchStorageService();
 
 function formatPrice(hit) {
   return {
@@ -11,7 +15,7 @@ function formatPrice(hit) {
 
 function formatSearchResults(catResults) {
   if (!catResults?.results?.[0]?.hits) {
-    return { lots: [], totalResults: 0 };
+    return { lots: [], totalResults: 0, pagination: { totalItems: 0, totalPages: 0 } };
   }
 
   const hits = catResults.results[0].hits;
@@ -25,9 +29,38 @@ function formatSearchResults(catResults) {
     saleType: hit.saleType
   }));
 
+  // Extract pagination metadata
+  let totalItems = 0;
+  let totalPages = 0;
+  let itemsPerPage = 96; // Default value used by Invaluable
+
+  // Check for metadata in different possible locations
+  if (catResults.results?.[0]?.meta?.totalHits) {
+    // Standard metadata location
+    totalItems = catResults.results[0].meta.totalHits;
+    itemsPerPage = catResults.results[0].meta.hitsPerPage || itemsPerPage;
+  } else if (catResults.nbHits) {
+    // Algolia direct response format
+    totalItems = catResults.nbHits;
+    itemsPerPage = catResults.hitsPerPage || itemsPerPage;
+  } else if (catResults.results?.[0]?.nbHits) {
+    // Alternative Algolia format
+    totalItems = catResults.results[0].nbHits;
+    itemsPerPage = catResults.results[0].hitsPerPage || itemsPerPage;
+  }
+
+  // Calculate total pages
+  totalPages = Math.ceil(totalItems / itemsPerPage);
+
   return {
     lots,
-    totalResults: lots.length
+    totalResults: lots.length,
+    pagination: {
+      totalItems,
+      totalPages,
+      itemsPerPage,
+      currentPage: catResults.results?.[0]?.meta?.page || 1
+    }
   };
 }
 
@@ -45,7 +78,17 @@ function standardizeResponse(data, parameters = {}) {
         }
       }
     },
-    data: data
+    // Include pagination metadata in the response
+    pagination: data.pagination || {
+      totalItems: 0,
+      totalPages: 0,
+      itemsPerPage: 0,
+      currentPage: 1
+    },
+    data: {
+      lots: data.lots || [],
+      totalResults: data.totalResults || 0
+    }
   };
 }
 
@@ -100,6 +143,13 @@ router.get('/', async (req, res) => {
     // Get max pages to fetch if specified
     const maxPages = parseInt(req.query.maxPages) || 10;
     delete searchParams.maxPages;
+    
+    // Check if we should save to GCS
+    const saveToGcs = req.query.saveToGcs === 'true';
+    delete searchParams.saveToGcs;
+    
+    // Get category/search term for storage
+    const category = searchParams.query || 'uncategorized';
 
     console.log('Starting search with parameters:', searchParams);
     
@@ -120,10 +170,32 @@ router.get('/', async (req, res) => {
     }
     
     const formattedResults = formatSearchResults(result);
+    
+    // Log pagination information
+    if (formattedResults.pagination) {
+      console.log(`Search found ${formattedResults.pagination.totalItems} total items across ${formattedResults.pagination.totalPages} pages`);
+    }
+    
+    // Save to GCS if enabled
+    if (saveToGcs) {
+      try {
+        const currentPage = formattedResults.pagination?.currentPage || 1;
+        console.log(`Saving search results to GCS for category: ${category}, page: ${currentPage}`);
+        
+        // Store the raw results in GCS
+        const gcsPath = await searchStorage.savePageResults(category, currentPage, result);
+        console.log(`Saved search results to GCS at: ${gcsPath}`);
+      } catch (error) {
+        console.error('Error saving search results to GCS:', error);
+        // Continue with response even if storage fails
+      }
+    }
+    
     res.json(standardizeResponse(formattedResults, {
       ...searchParams,
       fetchAllPages: fetchAllPages ? 'true' : 'false',
-      maxPages: maxPages
+      maxPages: maxPages,
+      saveToGcs: saveToGcs ? 'true' : 'false'
     }));
     
   } catch (error) {
@@ -152,8 +224,33 @@ router.post('/direct', express.json({ limit: '10mb' }), async (req, res) => {
     const apiData = req.body.apiData;
     const searchParams = req.body.searchParams || {};
     
+    // Check if we should save to GCS
+    const saveToGcs = req.body.saveToGcs === true;
+    
+    // Get category/search term for storage
+    const category = searchParams.query || 'uncategorized';
+    
     const formattedResults = formatSearchResults(apiData);
-    res.json(standardizeResponse(formattedResults, searchParams));
+    
+    // Save to GCS if enabled
+    if (saveToGcs) {
+      try {
+        const currentPage = formattedResults.pagination?.currentPage || 1;
+        console.log(`Saving direct API data to GCS for category: ${category}, page: ${currentPage}`);
+        
+        // Store the raw results in GCS
+        const gcsPath = await searchStorage.savePageResults(category, currentPage, apiData);
+        console.log(`Saved direct API data to GCS at: ${gcsPath}`);
+      } catch (error) {
+        console.error('Error saving direct API data to GCS:', error);
+        // Continue with response even if storage fails
+      }
+    }
+    
+    res.json(standardizeResponse(formattedResults, {
+      ...searchParams,
+      saveToGcs: saveToGcs ? 'true' : 'false'
+    }));
     
   } catch (error) {
     console.error('Error handling direct API data:', error);
@@ -181,6 +278,12 @@ router.post('/combine-pages', express.json({ limit: '10mb' }), async (req, res) 
     const pages = req.body.pages;
     const searchParams = req.body.searchParams || {};
     
+    // Check if we should save to GCS
+    const saveToGcs = req.body.saveToGcs === true;
+    
+    // Get category/search term for storage
+    const category = searchParams.query || 'uncategorized';
+    
     // Use the first page as the base
     let combinedData = JSON.parse(JSON.stringify(pages[0]));
     
@@ -204,7 +307,32 @@ router.post('/combine-pages', express.json({ limit: '10mb' }), async (req, res) 
     }
     
     const formattedResults = formatSearchResults(combinedData);
-    res.json(standardizeResponse(formattedResults, searchParams));
+    
+    // Save individual pages to GCS if enabled
+    if (saveToGcs) {
+      try {
+        console.log(`Saving ${pages.length} individual page results to GCS for category: ${category}`);
+        
+        // Save each page individually
+        for (let i = 0; i < pages.length; i++) {
+          const page = pages[i];
+          const pageNumber = (page.results?.[0]?.meta?.page) || (i + 1);
+          
+          // Store the raw page results in GCS
+          const gcsPath = await searchStorage.savePageResults(category, pageNumber, page);
+          console.log(`Saved page ${pageNumber} results to GCS at: ${gcsPath}`);
+        }
+      } catch (error) {
+        console.error('Error saving combined pages to GCS:', error);
+        // Continue with response even if storage fails
+      }
+    }
+    
+    res.json(standardizeResponse(formattedResults, {
+      ...searchParams,
+      saveToGcs: saveToGcs ? 'true' : 'false',
+      combinedPages: pages.length
+    }));
     
   } catch (error) {
     console.error('Error combining API data pages:', error);
