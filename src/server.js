@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const searchRouter = require('./routes/search');
 const scraperRouter = require('./routes/scraper');
 const InvaluableScraper = require('./scrapers/invaluable');
@@ -30,9 +31,13 @@ app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'Invaluable Search API is running' });
 });
 
-app.use(cors());
-app.use(express.json());
+// Serve client interceptor tool
+app.use(express.static(path.join(__dirname, '../public')));
 
+app.use(cors());
+app.use(express.json({ limit: '50mb' }));
+
+// Lazy initialization of the scraper
 async function initializeScraper() {
   if (isInitializing) {
     while (isInitializing) {
@@ -41,8 +46,12 @@ async function initializeScraper() {
     return;
   }
 
+  if (invaluableScraper.initialized) {
+    return;
+  }
+
   isInitializing = true;
-  console.log('Starting Invaluable scraper initialization...');
+  console.log('Starting Invaluable scraper initialization on demand...');
 
   try {
     await invaluableScraper.initialize();
@@ -56,11 +65,24 @@ async function initializeScraper() {
   }
 }
 
-// Initialize scraper and set up routes
-async function startServer() {
+// Set up middleware to initialize scraper only when needed
+app.use('/api/search', async (req, res, next) => {
   try {
     await initializeScraper();
-    
+    next();
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: 'Failed to initialize scraper',
+      message: error.message
+    });
+  }
+});
+
+// Initialize routes without starting the scraper automatically
+async function startServer() {
+  try {
+    // Set up routes
     app.use('/api/search', searchRouter);
     app.use('/api/scraper', scraperRouter);
     
