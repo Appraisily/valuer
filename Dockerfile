@@ -15,9 +15,12 @@ RUN apt-get update && apt-get install -y \
 # Create app directory
 WORKDIR /usr/src/app
 
-# Install app dependencies
+# Create temp directory for Chrome user data
+RUN mkdir -p temp/chrome-data && chmod -R 777 temp
+
+# Install app dependencies using npm ci for exact versions
 COPY package*.json ./
-RUN npm install
+RUN npm ci
 
 # Bundle app source
 COPY . .

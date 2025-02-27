@@ -5,10 +5,25 @@
  * with resumable pagination, progress tracking, rate limiting, and GCS storage.
  */
 const path = require('path');
+const fs = require('fs');
 const BrowserManager = require('../scrapers/invaluable/browser');
 const { buildSearchParams } = require('../scrapers/invaluable/utils');
 const { handleFirstPage } = require('../scrapers/invaluable/pagination');
 const PaginationManager = require('../scrapers/invaluable/pagination/pagination-manager');
+
+// Ensure temp directory exists
+const tempDir = path.join(__dirname, '../../temp/chrome-data');
+try {
+  if (!fs.existsSync(path.join(__dirname, '../../temp'))) {
+    fs.mkdirSync(path.join(__dirname, '../../temp'));
+  }
+  if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir);
+  }
+} catch (err) {
+  console.warn('Warning: Could not create temp directory:', err.message);
+  // Continue anyway, as we can run headless without a user data dir
+}
 
 // Configuration
 const CONFIG = {
@@ -18,19 +33,19 @@ const CONFIG = {
   startPage: 1,               // Page to start from (useful for resuming)
   
   // Browser settings
-  userDataDir: path.join(__dirname, '../../temp/chrome-data'),
-  headless: false,            // Set to true for production
+  userDataDir: tempDir,
+  headless: true,             // Running headless in production
   
   // Storage settings
   gcsEnabled: true,           // Enable Google Cloud Storage
-  gcsBucket: 'invaluable-data',
+  gcsBucket: process.env.STORAGE_BUCKET || 'invaluable-data',
   batchSize: 100,             // Number of pages per batch file
   // If using explicit credentials file or object (optional)
   // gcsCredentials: require('../path/to/credentials.json'), 
   
   // Rate limiting settings
-  baseDelay: 2000,            // Base delay between requests in ms
-  maxDelay: 30000,            // Maximum delay in ms
+  baseDelay: 1500,            // Base delay between requests
+  maxDelay: 4000,             // Maximum delay
   minDelay: 1000,             // Minimum delay in ms
   maxRetries: 3,              // Maximum retries per page
   
