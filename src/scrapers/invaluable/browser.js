@@ -46,6 +46,11 @@ class BrowserManager {
     this.pages = new Map();
   }
 
+  // Add init method as an alias to initialize for compatibility with the category scraper
+  async init() {
+    return this.initialize();
+  }
+
   async initialize() {
     if (!this.browser) {
       console.log('Initializing browser...');

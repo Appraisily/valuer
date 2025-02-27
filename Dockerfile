@@ -1,41 +1,34 @@
-FROM node:20-slim
+FROM node:18-slim
 
-# Install Chrome dependencies - optimized layer with apt cache cleanup
+# Install Chrome dependencies
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
     ca-certificates \
     procps \
-    --no-install-recommends \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
     && apt-get update \
-    && apt-get install -y google-chrome-stable --no-install-recommends \
-    && apt-get clean \
+    && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
 # Create app directory
 WORKDIR /usr/src/app
 
-# Install app dependencies - split for better caching
-COPY package.json package-lock.json ./
+# Skip Puppeteer download since we're using the installed Chrome
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
-# Use ci instead of install for faster and more reliable builds
-RUN npm ci
+# Install app dependencies with npm cache clean
+COPY package*.json ./
+RUN npm cache clean --force && \
+    npm install --no-optional --verbose
 
 # Bundle app source
 COPY . .
 
 # Expose port
 EXPOSE 3000
-
-# Use a non-root user for better security
-RUN groupadd -r appuser && useradd -r -g appuser -G audio,video appuser \
-    && mkdir -p /home/appuser/Downloads \
-    && chown -R appuser:appuser /home/appuser \
-    && chown -R appuser:appuser /usr/src/app
-
-USER appuser
 
 # Start the application
 CMD [ "npm", "start" ]
