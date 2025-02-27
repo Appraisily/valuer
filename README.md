@@ -101,6 +101,8 @@ Query Parameters:
 - `priceResult[max]`: Maximum price
 - `houseName`: Auction house name
 - `upcoming`: Filter for upcoming auctions (true/false)
+- `fetchAllPages`: Set to `true` to automatically fetch all pages of results
+- `maxPages`: Maximum number of pages to fetch when using `fetchAllPages` (default: 10)
 
 Example Requests:
 ```bash
@@ -115,7 +117,28 @@ curl "http://localhost:8080/api/search?query=Antique+Victorian+mahogany+dining+t
 
 # Search specific auction house
 curl "http://localhost:8080/api/search?houseName=DOYLE%20Auctioneers%20%26%20Appraisers&query=antique"
+
+# Search with pagination to get multiple pages
+curl "https://valuer-dev-856401495068.us-central1.run.app/api/search?query=furniture&fetchAllPages=true&maxPages=3"
 ```
+
+### Pagination and Data Interception Process
+
+When using the endpoint with pagination parameters (like `https://valuer-dev-856401495068.us-central1.run.app/api/search?query=furniture&fetchAllPages=true&maxPages=3`), the API works as follows:
+
+1. **Request Interception**: The system uses Puppeteer to create an automated browser session to Invaluable's website.
+
+2. **catResults Capture**: The API intercepts the JSON responses from Invaluable's internal `/catResults` endpoint, which contains the raw auction data.
+
+3. **Pagination Handling**: When `fetchAllPages=true` is specified:
+   - The API first captures the initial page of results
+   - It then automatically navigates through subsequent pages (up to the `maxPages` limit)
+   - For each page, it intercepts the `/catResults` response
+   - All pages are combined into a single comprehensive response
+
+4. **Data Processing**: The raw JSON data from the catResults endpoint is processed and standardized to provide a consistent response format.
+
+5. **Response Format**: The final response includes all auction lots from all fetched pages, with detailed information about each item.
 
 Example Response:
 ```json

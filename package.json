@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@google-cloud/storage": "^6.10.1",
-    "puppeteer": "^20.5.0",
+    "puppeteer": "^22.10.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "uuid": "^9.0.0"
