@@ -17,6 +17,10 @@ const {
   checkIfDifferentResults,
   shouldContinueProcessing
 } = require('./results-processor');
+const SearchStorageService = require('../../../utils/search-storage');
+
+// Initialize the storage service
+const searchStorage = new SearchStorageService();
 
 /**
  * Helper function to wait for a specific time
@@ -107,6 +111,18 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
   // Calcular cuántas páginas procesar (basado en el mínimo entre maxPages y totalPages)
   const pagesToProcess = Math.min(maxPages, totalPages || 1);
   console.log(`Procesando ${pagesToProcess} páginas en total (de un total de ${totalPages || 'desconocido'})`);
+  
+  // Guardar primera página en GCS con formato page_XXXX.json
+  try {
+    // Determinar la categoría/consulta para guardar
+    const category = params.query || 'uncategorized';
+    // Guardar la primera página
+    const firstPagePath = await searchStorage.savePageResults(category, 1, firstPageResults);
+    console.log(`✅ Primera página guardada en GCS: ${firstPagePath}`);
+  } catch (storageError) {
+    console.error(`❌ Error al guardar primera página en GCS: ${storageError.message}`);
+    // Continuar a pesar del error
+  }
   
   // Si solo hay una página, devolver resultados directamente
   if (pagesToProcess <= 1) {
@@ -222,6 +238,19 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
         // Adaptado para la estructura específica de Invaluable
         if (pageResults && pageResults.results && pageResults.results[0]?.hits) {
           const pageHits = pageResults.results[0].hits;
+          
+          // Guardar página actual en GCS con formato page_XXXX.json
+          try {
+            // Determinar la categoría/consulta para guardar
+            const category = params.query || 'uncategorized';
+            // Guardar la página actual
+            const pagePath = await searchStorage.savePageResults(category, pageNum, pageResults);
+            console.log(`✅ Página ${pageNum} guardada en GCS: ${pagePath}`);
+          } catch (storageError) {
+            console.error(`❌ Error al guardar página ${pageNum} en GCS: ${storageError.message}`);
+            // Continuar a pesar del error
+          }
+          
           let newResults = 0;
           let duplicates = 0;
           
@@ -256,12 +285,10 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
           
           // Verificar si debemos continuar
           const maxResults = config.maxResults || 0;
-          const reachedTotalItems = allResults.results[0].hits.length >= totalItems;
           const reachedMaxResults = maxResults > 0 && allResults.results[0].hits.length >= maxResults;
           
-          if (reachedTotalItems || reachedMaxResults) {
-            const reason = reachedTotalItems ? 'total de items' : 'límite máximo configurado';
-            console.log(`Finalizando paginación tempranamente: alcanzado ${reason}`);
+          if (reachedMaxResults) {
+            console.log(`Finalizando paginación tempranamente: alcanzado límite máximo configurado`);
             break;
           }
         } else {

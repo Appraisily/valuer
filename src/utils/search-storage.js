@@ -33,11 +33,11 @@ class SearchStorageService {
   
   /**
    * Generate file path for page results
-   * Format: invaluable-data/{category}/pages_XXX.json
+   * Format: invaluable-data/{category}/page_XXXX.json
    */
   getPageFilePath(category, pageNumber) {
-    const paddedPage = String(pageNumber).padStart(3, '0');
-    return `invaluable-data/${category}/pages_${paddedPage}.json`;
+    const paddedPage = String(pageNumber).padStart(4, '0');
+    return `invaluable-data/${category}/page_${paddedPage}.json`;
   }
   
   /**

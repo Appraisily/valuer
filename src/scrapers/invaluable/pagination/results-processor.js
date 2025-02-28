@@ -96,11 +96,7 @@ function checkIfDifferentResults(currentHits, processedIds) {
  * @returns {boolean} - true si se debe continuar, false si se debe finalizar
  */
 function shouldContinueProcessing(allResults, totalItems, maxResults) {
-  // Si no hay más resultados según metadatos, detener
-  if (allResults.length >= totalItems) {
-    console.log(`Alcanzado el total de resultados según metadatos: ${allResults.length}/${totalItems}`);
-    return false;
-  }
+  // Removed check for totalItems, respecting only maxResults
   
   // Si se alcanzó el máximo de resultados configurado, detener
   if (maxResults > 0 && allResults.length >= maxResults) {
