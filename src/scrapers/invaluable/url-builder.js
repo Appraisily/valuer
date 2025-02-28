@@ -27,6 +27,15 @@ function constructSearchUrl(params = {}) {
     searchParams.append('query', params.query);
   }
 
+  // Add keyword parameter (should match query if both are used)
+  if (params.keyword) {
+    searchParams.append('keyword', params.keyword);
+  }
+
+  // Always set upcoming=false to focus on past auctions unless explicitly set
+  const upcomingValue = params.upcoming !== undefined ? params.upcoming : false;
+  searchParams.append('upcoming', upcomingValue.toString());
+
   // Add category parameters if present
   if (params.supercategoryName) {
     searchParams.append('supercategoryName', params.supercategoryName);

@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const searchRouter = require('./routes/search');
 const scraperRouter = require('./routes/scraper');
+const unifiedSearchRouter = require('./routes/unified-search');
 const InvaluableScraper = require('./scrapers/invaluable');
 
 const port = process.env.PORT || 8080;
@@ -85,6 +86,7 @@ async function startServer() {
     // Set up routes
     app.use('/api/search', searchRouter);
     app.use('/api/scraper', scraperRouter);
+    app.use('/api/unified-search', unifiedSearchRouter);
     
     const server = app.listen(port, '0.0.0.0', () => {
       console.log(`Server is now listening on port ${port}`);
