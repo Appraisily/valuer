@@ -19,6 +19,9 @@ function constructSearchUrl(params = {}) {
     if (params.priceResult.max) {
       searchParams.append('priceResult[max]', params.priceResult.max);
     }
+  } else {
+    // Añadir precio mínimo por defecto si no se especifica
+    searchParams.append('priceResult[min]', params.priceResult_min || '250');
   }
   
   // Añadir parámetros de búsqueda requeridos
@@ -35,7 +38,7 @@ function constructSearchUrl(params = {}) {
   Object.entries(params).forEach(([key, value]) => {
     // Omitir parámetros que ya hemos configurado
     if (value !== undefined && value !== null && 
-        !['upcoming', 'query', 'keyword', 'priceResult', 'page'].includes(key)) {
+        !['upcoming', 'query', 'keyword', 'priceResult', 'priceResult_min', 'page'].includes(key)) {
       searchParams.append(key, value);
     }
   });

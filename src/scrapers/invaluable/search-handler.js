@@ -34,6 +34,9 @@ async function handleSearch(browser, url, params = {}, cookies = [], config = {}
     let maxAttempts = 3;
     let attempts = 0;
     
+    // Almacenar todas las respuestas de catResults para usar la última
+    let allCatResults = [];
+    
     // Configurar listeners para interceptar respuestas de API
     page.on('response', async response => {
       const responseUrl = response.url();
@@ -43,10 +46,12 @@ async function handleSearch(browser, url, params = {}, cookies = [], config = {}
         console.log('✅ Interceptada respuesta de API catResults');
         try {
           const text = await response.text();
-          catResults = JSON.parse(text);
-          if (catResults && catResults.results && catResults.results[0] && catResults.results[0].hits) {
-            const hits = catResults.results[0].hits;
+          const result = JSON.parse(text);
+          if (result && result.results && result.results[0] && result.results[0].hits) {
+            const hits = result.results[0].hits;
             console.log(`Encontrados ${hits.length} resultados en la respuesta`);
+            // Añadir resultado a la lista de respuestas
+            allCatResults.push(result);
             foundResults = true;
           }
         } catch (error) {
@@ -236,7 +241,8 @@ async function handleSearch(browser, url, params = {}, cookies = [], config = {}
         
         // Verificar resultados de la solicitud directa
         if (results && results.results && results.results[0] && results.results[0].hits) {
-          catResults = results;
+          // Añadir también los resultados directos a la lista de resultados
+          allCatResults.push(results);
           const hits = results.results[0].hits;
           console.log(`✅ Solicitud API exitosa: ${hits.length} resultados encontrados`);
           foundResults = true;
@@ -281,7 +287,7 @@ async function handleSearch(browser, url, params = {}, cookies = [], config = {}
             console.log(`✅ Enfoque alternativo exitoso: ${alternativeResults.hits.length} resultados`);
             
             // Convertir al formato esperado
-            catResults = {
+            const formattedResults = {
               results: [{
                 hits: alternativeResults.hits,
                 meta: {
@@ -290,6 +296,9 @@ async function handleSearch(browser, url, params = {}, cookies = [], config = {}
                 }
               }]
             };
+            
+            // Añadir también estos resultados a la lista
+            allCatResults.push(formattedResults);
             foundResults = true;
           }
         }
@@ -314,6 +323,14 @@ async function handleSearch(browser, url, params = {}, cookies = [], config = {}
     
     // Verificar si las cookies cambiaron
     const cookiesChanged = detectCookieChanges(formattedCookies, updatedCookies);
+    
+    // Usar la última respuesta de catResults si tenemos múltiples
+    if (allCatResults.length > 0) {
+      console.log(`Se interceptaron ${allCatResults.length} respuestas de catResults`);
+      // Usar la última respuesta, que debería tener los filtros aplicados correctamente
+      catResults = allCatResults[allCatResults.length - 1];
+      console.log(`Usando la respuesta #${allCatResults.length} (última) con ${catResults.results[0].hits.length} resultados`);
+    }
     
     // Añadir las cookies actualizadas a los resultados
     if (catResults) {
