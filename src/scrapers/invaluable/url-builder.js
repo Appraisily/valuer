@@ -1,17 +1,18 @@
 /**
- * Módulo para construir URLs para el scraper de Invaluable
+ * URL builder module for the Invaluable scraper
  */
+const { API_BASE_URL, DEFAULT_SORT } = require('./constants');
 
 /**
- * Construye una URL de búsqueda basada en los parámetros proporcionados
- * @param {Object} params - Parámetros de búsqueda
- * @returns {string} URL completa para la búsqueda
+ * Constructs a search URL based on the provided parameters
+ * @param {Object} params - Search parameters
+ * @returns {string} Complete URL for search
  */
 function constructSearchUrl(params = {}) {
-  const baseUrl = 'https://www.invaluable.com/search';
+  const baseUrl = `${API_BASE_URL}/search`;
   const searchParams = new URLSearchParams();
 
-  // Manejar parámetros de rango de precios anidados
+  // Handle nested price range parameters
   if (params.priceResult) {
     if (params.priceResult.min) {
       searchParams.append('priceResult[min]', params.priceResult.min);
@@ -20,27 +21,40 @@ function constructSearchUrl(params = {}) {
       searchParams.append('priceResult[max]', params.priceResult.max);
     }
   }
-  
-  // Añadir parámetros de búsqueda requeridos
-  searchParams.append('upcoming', 'false');
-  searchParams.append('query', params.query || 'furniture');
-  searchParams.append('keyword', params.keyword || params.query || 'furniture');
-  
-  // Manejar parámetros de paginación
-  if (params.page && !isNaN(params.page)) {
+
+  // Add query parameters if present
+  if (params.query) {
+    searchParams.append('query', params.query);
+  }
+
+  // Add category parameters if present
+  if (params.supercategoryName) {
+    searchParams.append('supercategoryName', params.supercategoryName);
+  }
+  if (params.categoryName) {
+    searchParams.append('categoryName', params.categoryName);
+  }
+  if (params.subcategoryName) {
+    searchParams.append('subcategoryName', params.subcategoryName);
+  }
+
+  // Add sorting parameter (default to sale_date|desc if not provided)
+  searchParams.append('sort', params.sort || DEFAULT_SORT);
+
+  // Add pagination parameter if present
+  if (params.page && params.page > 1) {
     searchParams.append('page', params.page);
   }
-  
-  // Añadir todos los parámetros proporcionados
-  Object.entries(params).forEach(([key, value]) => {
-    // Omitir parámetros que ya hemos configurado
-    if (value !== undefined && value !== null && 
-        !['upcoming', 'query', 'keyword', 'priceResult', 'page'].includes(key)) {
-      searchParams.append(key, value);
-    }
-  });
 
-  return `${baseUrl}?${searchParams.toString()}`;
+  // Build the complete URL
+  let url = baseUrl;
+  const queryString = searchParams.toString();
+  
+  if (queryString) {
+    url += `?${queryString}`;
+  }
+
+  return url;
 }
 
 module.exports = {

@@ -2,6 +2,7 @@
  * Módulo para manejar la interceptación de solicitudes HTTP durante la paginación
  */
 const { extractFromApiResponse } = require('./navigation-params');
+const { getTimestamp } = require('./utilities');
 
 // Constantes para URLs
 const API_BASE_URL = 'https://www.invaluable.com';
@@ -22,7 +23,6 @@ const COMMON_HEADERS = {
 };
 
 // Utility functions for logging
-const getTimestamp = () => new Date().toISOString();
 const formatElapsedTime = (startTime) => {
   const elapsed = Date.now() - startTime;
   if (elapsed < 1000) return `${elapsed}ms`;
@@ -31,123 +31,89 @@ const formatElapsedTime = (startTime) => {
 };
 
 /**
- * Configura la interceptación de solicitudes para la paginación
- * @param {Object} page - Instancia de la página
- * @param {Object} navState - Estado de navegación actual
- * @param {number} pageNum - Número de página actual
- * @param {Function} onApiResponse - Callback para manejar respuestas API
- * @returns {Promise<boolean>} - Estado de éxito
+ * Sets up request interception to capture API responses
+ * @param {Page} page - Puppeteer page instance
+ * @param {Object} navState - Navigation state object to update with response data
+ * @param {Number} pageNumber - Page number being processed
  */
-async function setupRequestInterception(page, navState, pageNum, onApiResponse) {
-  console.log(`[${getTimestamp()}] 🔍 Setting up request interception for page ${pageNum}`);
-  const startTime = Date.now();
-  
+const setupRequestInterception = async (page, navState, pageNumber) => {
   try {
+    // Enable request interception
     await page.setRequestInterception(true);
     
-    // Clear any existing listeners
-    await page.removeAllListeners('request');
-    
-    // Set up the request listener
+    // Set up event listeners for requests
     page.on('request', async (request) => {
-      const url = request.url();
-      
-      // Skip non-fetch requests
-      if (request.resourceType() !== 'fetch') {
-        request.continue();
-        return;
-      }
-      
-      // Log API requests
-      if (url.includes(CAT_RESULTS_ENDPOINT)) {
-        console.log(`[${getTimestamp()}] 📡 Intercepted results API request for page ${pageNum}`);
-        
-        // Get request body and modify for page
-        const requestBody = request.postData();
-        if (requestBody) {
-          try {
-            const requestStartTime = Date.now();
-            console.log(`[${getTimestamp()}] 🔄 Processing API request for page ${pageNum}`);
-            
-            // Continue with the request
-            request.continue();
-            
-            // Wait for the response
-            const [response] = await Promise.all([
-              page.waitForResponse(res => res.url().includes(CAT_RESULTS_ENDPOINT)),
-              page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 30000 }).catch(() => {})
-            ]);
-            
-            if (response) {
-              console.log(`[${getTimestamp()}] ✅ Received API response for page ${pageNum} (status ${response.status()})`);
-              
-              try {
-                const jsonResponse = await response.json();
-                navState.lastResponse = jsonResponse;
-                
-                // Extract result statistics
-                const hits = jsonResponse?.results?.[0]?.hits || [];
-                const meta = jsonResponse?.results?.[0]?.meta || {};
-                
-                console.log(`[${getTimestamp()}] 📊 Page ${pageNum} results: ${hits.length} hits, page ${meta.page || pageNum} of ${Math.ceil((meta.totalHits || 0) / (meta.hitsPerPage || 96))}`);
-                
-                // Extraer parámetros de navegación de la respuesta
-                const extractedParams = extractFromApiResponse(jsonResponse);
-                
-                // Actualizar el estado de navegación con los parámetros extraídos
-                if (extractedParams.refId) navState.refId = extractedParams.refId;
-                if (extractedParams.searchContext) navState.searchContext = extractedParams.searchContext;
-                if (extractedParams.searcher) navState.searcher = extractedParams.searcher;
-                
-                // Llamar al callback con la respuesta JSON
-                if (onApiResponse) {
-                  await onApiResponse(jsonResponse, response.status());
-                }
-                
-                // Log timing information
-                const requestElapsed = Date.now() - requestStartTime;
-                console.log(`[${getTimestamp()}] ⏱️ API request processed in ${formatElapsedTime(requestStartTime)} (${requestElapsed}ms)`);
-              } catch (error) {
-                console.error(`[${getTimestamp()}] ❌ Error parsing API response for page ${pageNum}: ${error.message}`);
-                navState.lastResponse = null;
-                
-                if (onApiResponse) {
-                  await onApiResponse(null, response.status());
-                }
-              }
-            } else {
-              console.error(`[${getTimestamp()}] ❌ No API response received for page ${pageNum}`);
-              navState.lastResponse = null;
-              
-              if (onApiResponse) {
-                await onApiResponse(null, 0);
-              }
-            }
-          } catch (error) {
-            console.error(`[${getTimestamp()}] ❌ Error processing request: ${error.message}`);
-            request.continue();
-          }
-        } else {
-          console.log(`[${getTimestamp()}] ⚠️ No request body found for page ${pageNum}`);
-          request.continue();
+      try {
+        // Let non-API requests continue normally
+        if (!request.url().includes('/api/search') && !request.url().includes('/api/v2/search')) {
+          await request.continue();
+          return;
         }
-      } else if (url.includes('/dist/') || url.includes('/static/')) {
-        // Bloquear recursos estáticos para mejorar rendimiento
-        request.abort();
-      } else {
-        // Otras solicitudes a invaluable.com continúan normalmente
-        request.continue();
+        
+        console.log(`[${getTimestamp()}] 🔍 Intercepted API request for page ${pageNumber}: ${request.url()}`);
+        
+        // Continue the request
+        await request.continue();
+      } catch (error) {
+        console.error(`[${getTimestamp()}] ❌ Error handling request: ${error.message}`);
+        // If we encounter an error with the request, try to continue anyway
+        try {
+          await request.continue();
+        } catch (continueErr) {
+          // Ignore errors when trying to continue a request that may already be handled
+        }
       }
     });
     
-    const elapsed = Date.now() - startTime;
-    console.log(`[${getTimestamp()}] ✅ Request interception setup completed in ${formatElapsedTime(startTime)} (${elapsed}ms)`);
-    return true;
+    // Set up event listeners for responses
+    page.on('response', async (response) => {
+      try {
+        const url = response.url();
+        // Only process API responses
+        if (!url.includes('/api/search') && !url.includes('/api/v2/search')) {
+          return;
+        }
+        
+        const status = response.status();
+        console.log(`[${getTimestamp()}] 📡 Received API response for page ${pageNumber}: ${status} ${url}`);
+        
+        // Process successful responses
+        if (status >= 200 && status < 300) {
+          try {
+            // Get the response body as JSON
+            const responseBody = await response.json();
+            
+            // Update the navigation state with the response data
+            navState.lastResponse = responseBody;
+            console.log(`[${getTimestamp()}] ✅ Successfully parsed API response for page ${pageNumber}`);
+          } catch (jsonErr) {
+            console.error(`[${getTimestamp()}] ⚠️ Failed to parse JSON response: ${jsonErr.message}`);
+            navState.lastResponse = null;
+          }
+        } else {
+          console.error(`[${getTimestamp()}] ⚠️ API request failed with status ${status}`);
+          navState.lastResponse = null;
+        }
+      } catch (error) {
+        console.error(`[${getTimestamp()}] ❌ Error handling response: ${error.message}`);
+        navState.lastResponse = null;
+      }
+    });
+    
+    // Handle request failures
+    page.on('requestfailed', (request) => {
+      const url = request.url();
+      if (url.includes('/api/search') || url.includes('/api/v2/search')) {
+        console.error(`[${getTimestamp()}] ❌ API request failed for page ${pageNumber}: ${url}`);
+        console.error(`[${getTimestamp()}] ❌ Failure reason: ${request.failure()?.errorText || 'Unknown error'}`);
+        navState.lastResponse = null;
+      }
+    });
   } catch (error) {
-    console.error(`[${getTimestamp()}] ❌ Error setting up request interception: ${error.message}`);
-    return false;
+    console.error(`[${getTimestamp()}] ❌ Failed to set up request interception: ${error.message}`);
+    throw error;
   }
-}
+};
 
 /**
  * Construye los headers para una solicitud

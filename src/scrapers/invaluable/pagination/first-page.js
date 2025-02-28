@@ -1,16 +1,9 @@
 /**
  * Module to handle the first page of search results
  */
-const { buildSearchParams } = require('../../../utils');
-
-// Utility functions for logging
-const getTimestamp = () => new Date().toISOString();
-const formatElapsedTime = (startTime) => {
-  const elapsed = Date.now() - startTime;
-  if (elapsed < 1000) return `${elapsed}ms`;
-  if (elapsed < 60000) return `${(elapsed/1000).toFixed(2)}s`;
-  return `${(elapsed/60000).toFixed(2)}min`;
-};
+const { constructSearchUrl } = require('../url-builder');
+const { getTimestamp, formatElapsedTime, wait } = require('./utilities');
+const { DEFAULT_TIMEOUT } = require('../constants');
 
 /**
  * Handles the first page of search results
@@ -34,8 +27,7 @@ const handleFirstPage = async (browser, params, cookies = []) => {
     }
     
     // Build the search URL
-    const searchParams = buildSearchParams(params);
-    const searchUrl = `https://www.invaluable.com/search/items?${searchParams}`;
+    const searchUrl = constructSearchUrl(params);
     
     console.log(`[${getTimestamp()}] 🌐 Navigating to: ${searchUrl}`);
     
@@ -45,7 +37,8 @@ const handleFirstPage = async (browser, params, cookies = []) => {
       const url = response.url();
       
       // Only process JSON responses from the catalog results endpoint
-      if (url.includes('/cat-results') && response.headers()['content-type']?.includes('application/json')) {
+      if ((url.includes('/api/search') || url.includes('/cat-results')) && 
+          response.headers()['content-type']?.includes('application/json')) {
         try {
           const json = await response.json();
           searchResults = json;
@@ -64,10 +57,10 @@ const handleFirstPage = async (browser, params, cookies = []) => {
     });
     
     // Navigate to the search URL
-    await page.goto(searchUrl, { waitUntil: 'networkidle0', timeout: 30000 });
+    await page.goto(searchUrl, { waitUntil: 'networkidle0', timeout: DEFAULT_TIMEOUT });
     
     // Wait a bit to ensure all responses are processed
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await wait(page, 1000);
     
     // Close the page
     await page.close();
