@@ -176,14 +176,22 @@ router.get('/', async (req, res) => {
       console.log(`Search found ${formattedResults.pagination.totalItems} total items across ${formattedResults.pagination.totalPages} pages`);
     }
     
+    // Create the standardized response
+    const standardizedResponse = standardizeResponse(formattedResults, {
+      ...searchParams,
+      fetchAllPages: fetchAllPages ? 'true' : 'false',
+      maxPages: maxPages,
+      saveToGcs: saveToGcs ? 'true' : 'false'
+    });
+    
     // Save to GCS if enabled
     if (saveToGcs) {
       try {
         const currentPage = formattedResults.pagination?.currentPage || 1;
         console.log(`Saving search results to GCS for category: ${category}, page: ${currentPage}`);
         
-        // Store the raw results in GCS
-        const gcsPath = await searchStorage.savePageResults(category, currentPage, result);
+        // Store the standardized response in GCS instead of raw results
+        const gcsPath = await searchStorage.savePageResults(category, currentPage, standardizedResponse);
         console.log(`Saved search results to GCS at: ${gcsPath}`);
       } catch (error) {
         console.error('Error saving search results to GCS:', error);
@@ -191,12 +199,7 @@ router.get('/', async (req, res) => {
       }
     }
     
-    res.json(standardizeResponse(formattedResults, {
-      ...searchParams,
-      fetchAllPages: fetchAllPages ? 'true' : 'false',
-      maxPages: maxPages,
-      saveToGcs: saveToGcs ? 'true' : 'false'
-    }));
+    res.json(standardizedResponse);
     
   } catch (error) {
     console.error('Error in search route:', error);
@@ -232,14 +235,20 @@ router.post('/direct', express.json({ limit: '10mb' }), async (req, res) => {
     
     const formattedResults = formatSearchResults(apiData);
     
+    // Create standardized response
+    const standardizedResponse = standardizeResponse(formattedResults, {
+      ...searchParams,
+      saveToGcs: saveToGcs ? 'true' : 'false'
+    });
+    
     // Save to GCS if enabled
     if (saveToGcs) {
       try {
         const currentPage = formattedResults.pagination?.currentPage || 1;
         console.log(`Saving direct API data to GCS for category: ${category}, page: ${currentPage}`);
         
-        // Store the raw results in GCS
-        const gcsPath = await searchStorage.savePageResults(category, currentPage, apiData);
+        // Store the standardized response in GCS instead of raw data
+        const gcsPath = await searchStorage.savePageResults(category, currentPage, standardizedResponse);
         console.log(`Saved direct API data to GCS at: ${gcsPath}`);
       } catch (error) {
         console.error('Error saving direct API data to GCS:', error);
@@ -247,10 +256,7 @@ router.post('/direct', express.json({ limit: '10mb' }), async (req, res) => {
       }
     }
     
-    res.json(standardizeResponse(formattedResults, {
-      ...searchParams,
-      saveToGcs: saveToGcs ? 'true' : 'false'
-    }));
+    res.json(standardizedResponse);
     
   } catch (error) {
     console.error('Error handling direct API data:', error);
@@ -308,6 +314,13 @@ router.post('/combine-pages', express.json({ limit: '10mb' }), async (req, res) 
     
     const formattedResults = formatSearchResults(combinedData);
     
+    // Create standardized response for combined pages
+    const standardizedResponse = standardizeResponse(formattedResults, {
+      ...searchParams,
+      saveToGcs: saveToGcs ? 'true' : 'false',
+      combinedPages: pages.length
+    });
+    
     // Save individual pages to GCS if enabled
     if (saveToGcs) {
       try {
@@ -318,8 +331,16 @@ router.post('/combine-pages', express.json({ limit: '10mb' }), async (req, res) 
           const page = pages[i];
           const pageNumber = (page.results?.[0]?.meta?.page) || (i + 1);
           
-          // Store the raw page results in GCS
-          const gcsPath = await searchStorage.savePageResults(category, pageNumber, page);
+          // Format the individual page
+          const pageFormattedResults = formatSearchResults(page);
+          const pageStandardizedResponse = standardizeResponse(pageFormattedResults, {
+            ...searchParams,
+            saveToGcs: 'true',
+            page: pageNumber
+          });
+          
+          // Store the formatted page results in GCS
+          const gcsPath = await searchStorage.savePageResults(category, pageNumber, pageStandardizedResponse);
           console.log(`Saved page ${pageNumber} results to GCS at: ${gcsPath}`);
         }
       } catch (error) {
@@ -328,11 +349,7 @@ router.post('/combine-pages', express.json({ limit: '10mb' }), async (req, res) 
       }
     }
     
-    res.json(standardizeResponse(formattedResults, {
-      ...searchParams,
-      saveToGcs: saveToGcs ? 'true' : 'false',
-      combinedPages: pages.length
-    }));
+    res.json(standardizedResponse);
     
   } catch (error) {
     console.error('Error combining API data pages:', error);
