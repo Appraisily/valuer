@@ -34,11 +34,17 @@ function constructSearchUrl(params = {}) {
     searchParams.append('page', params.page);
   }
   
+  // Manejar el parámetro de subcategoría de muebles si está presente
+  if (params.furnitureSubcategory) {
+    // Este es un parámetro especial que mapea a la estructura de URL de Invaluable para subcategorías de muebles
+    searchParams.append('Furniture', params.furnitureSubcategory);
+  }
+  
   // Añadir todos los parámetros proporcionados
   Object.entries(params).forEach(([key, value]) => {
     // Omitir parámetros que ya hemos configurado
     if (value !== undefined && value !== null && 
-        !['upcoming', 'query', 'keyword', 'priceResult', 'priceResult_min', 'page'].includes(key)) {
+        !['upcoming', 'query', 'keyword', 'priceResult', 'priceResult_min', 'page', 'furnitureSubcategory'].includes(key)) {
       searchParams.append(key, value);
     }
   });
@@ -46,6 +52,30 @@ function constructSearchUrl(params = {}) {
   return `${baseUrl}?${searchParams.toString()}`;
 }
 
+/**
+ * Procesa y codifica una subcategoría de muebles para su uso en una URL
+ * @param {string} subcategory - Nombre de la subcategoría (por ejemplo, "Tables, Stands & Consoles")
+ * @returns {string} Subcategoría codificada para URL
+ */
+function encodeFurnitureSubcategory(subcategory) {
+  if (!subcategory) return '';
+  
+  // Primero codificar la subcategoría como URI component
+  let encoded = encodeURIComponent(subcategory);
+  
+  // Luego codificar de nuevo los caracteres especiales (doble codificación para Invaluable)
+  encoded = encoded.replace(/%/g, '%25')
+                  .replace(/&/g, '%2526')
+                  .replace(/,/g, '%252C')
+                  .replace(/=/g, '%253D')
+                  .replace(/\+/g, '%252B')
+                  .replace(/\//g, '%252F')
+                  .replace(/\s/g, '%2520');
+  
+  return encoded;
+}
+
 module.exports = {
-  constructSearchUrl
+  constructSearchUrl,
+  encodeFurnitureSubcategory
 }; 

@@ -32,12 +32,35 @@ class SearchStorageService {
   }
   
   /**
+   * Sanitize a name for file path use
+   * @param {string} name - The name to sanitize
+   * @returns {string} - Sanitized name
+   */
+  sanitizeName(name) {
+    if (!name) return 'unknown';
+    
+    return name.toLowerCase()
+      .replace(/[^a-z0-9-_]/g, '-')
+      .replace(/-+/g, '-');
+  }
+  
+  /**
    * Generate file path for page results
    * Format: invaluable-data/{category}/page_XXXX.json
    */
-  getPageFilePath(category, pageNumber) {
+  getPageFilePath(category, pageNumber, subcategory = null) {
     const paddedPage = String(pageNumber).padStart(4, '0');
-    return `invaluable-data/${category}/page_${paddedPage}.json`;
+    
+    if (subcategory) {
+      // If subcategory is provided, use a nested path structure
+      const sanitizedCategory = this.sanitizeName(category);
+      const sanitizedSubcategory = this.sanitizeName(subcategory);
+      return `invaluable-data/${sanitizedCategory}/${sanitizedSubcategory}/page_${paddedPage}.json`;
+    } else {
+      // Default path structure without subcategory
+      const sanitizedCategory = this.sanitizeName(category);
+      return `invaluable-data/${sanitizedCategory}/page_${paddedPage}.json`;
+    }
   }
   
   /**
@@ -45,19 +68,15 @@ class SearchStorageService {
    * @param {string} category - Category/search term used
    * @param {number} pageNumber - Page number
    * @param {object} rawResults - Raw JSON response from the API
+   * @param {string} subcategory - Optional subcategory name
    * @returns {Promise<string>} - GCS file path
    */
-  async savePageResults(category, pageNumber, rawResults) {
+  async savePageResults(category, pageNumber, rawResults, subcategory = null) {
     if (!category) {
       throw new Error('Category is required for storing search results');
     }
     
-    // Sanitize category name for use in file path
-    const sanitizedCategory = category.toLowerCase()
-      .replace(/[^a-z0-9-_]/g, '-')
-      .replace(/-+/g, '-');
-    
-    const filePath = this.getPageFilePath(sanitizedCategory, pageNumber);
+    const filePath = this.getPageFilePath(category, pageNumber, subcategory);
     
     try {
       const file = this.bucket.file(filePath);
@@ -81,19 +100,15 @@ class SearchStorageService {
    * Check if page results exist
    * @param {string} category - Category/search term used
    * @param {number} pageNumber - Page number
+   * @param {string} subcategory - Optional subcategory name
    * @returns {Promise<boolean>} - Whether the file exists
    */
-  async pageResultsExist(category, pageNumber) {
+  async pageResultsExist(category, pageNumber, subcategory = null) {
     if (!category) {
       return false;
     }
     
-    // Sanitize category name
-    const sanitizedCategory = category.toLowerCase()
-      .replace(/[^a-z0-9-_]/g, '-')
-      .replace(/-+/g, '-');
-    
-    const filePath = this.getPageFilePath(sanitizedCategory, pageNumber);
+    const filePath = this.getPageFilePath(category, pageNumber, subcategory);
     
     try {
       const file = this.bucket.file(filePath);
@@ -102,6 +117,46 @@ class SearchStorageService {
     } catch (error) {
       console.error(`Error checking if page results exist: ${error.message}`);
       return false;
+    }
+  }
+  
+  /**
+   * List all existing pages for a category and subcategory
+   * @param {string} category - Main category
+   * @param {string} subcategory - Optional subcategory 
+   * @returns {Promise<Array<number>>} - Array of existing page numbers
+   */
+  async listExistingPages(category, subcategory = null) {
+    if (!category) {
+      return [];
+    }
+    
+    try {
+      let prefix;
+      if (subcategory) {
+        const sanitizedCategory = this.sanitizeName(category);
+        const sanitizedSubcategory = this.sanitizeName(subcategory);
+        prefix = `invaluable-data/${sanitizedCategory}/${sanitizedSubcategory}/`;
+      } else {
+        const sanitizedCategory = this.sanitizeName(category);
+        prefix = `invaluable-data/${sanitizedCategory}/`;
+      }
+      
+      const [files] = await this.bucket.getFiles({ prefix });
+      
+      // Extract page numbers from filenames using regex
+      const pageNumbers = files
+        .map(file => {
+          const match = file.name.match(/page_(\d{4})\.json$/);
+          return match ? parseInt(match[1], 10) : null;
+        })
+        .filter(pageNum => pageNum !== null)
+        .sort((a, b) => a - b);
+      
+      return pageNumbers;
+    } catch (error) {
+      console.error(`Error listing existing pages: ${error.message}`);
+      return [];
     }
   }
 }

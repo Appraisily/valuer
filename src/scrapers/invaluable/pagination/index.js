@@ -167,9 +167,10 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
       // Verificar si la página ya existe en GCS (para reanudación)
       try {
         const category = params.query || 'uncategorized';
-        const pageExists = await searchStorage.pageResultsExist(category, pageNum);
+        const subcategory = params.furnitureSubcategory || null;
+        const pageExists = await searchStorage.pageResultsExist(category, pageNum, subcategory);
         if (pageExists) {
-          console.log(`Página ${pageNum} ya existe en GCS, saltando`);
+          console.log(`Página ${pageNum} ya existe en GCS${subcategory ? ` para subcategoría '${subcategory}'` : ''}, saltando`);
           successfulPages.add(pageNum);
           skippedExistingPages++; // Incrementar contador de páginas omitidas
           continue;
@@ -259,8 +260,10 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
           try {
             // Determinar la categoría/consulta para guardar
             const category = params.query || 'uncategorized';
+            // Determinar subcategoría si existe
+            const subcategory = params.furnitureSubcategory || null;
             // Guardar la página actual
-            const pagePath = await searchStorage.savePageResults(category, pageNum, pageResults);
+            const pagePath = await searchStorage.savePageResults(category, pageNum, pageResults, subcategory);
             console.log(`✅ Página ${pageNum} guardada en GCS: ${pagePath}`);
           } catch (storageError) {
             console.error(`❌ Error al guardar página ${pageNum} en GCS: ${storageError.message}`);
