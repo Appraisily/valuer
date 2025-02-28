@@ -1,17 +1,19 @@
 /**
  * Test script for Invaluable scraper with GCS integration
- * Updated to use the UnifiedScraper
- * Limited to configurable pages for testing
+ * Limited to 3 pages to verify GCS storage functionality
  */
 const path = require('path');
-const UnifiedScraper = require('../scrapers/invaluable/unified-scraper');
+const BrowserManager = require('../scrapers/invaluable/browser');
+const { buildSearchParams } = require('../scrapers/invaluable/utils');
+const { handleFirstPage } = require('../scrapers/invaluable/pagination');
+const PaginationManager = require('../scrapers/invaluable/pagination/pagination-manager');
 
-// Test configuration - LIMITED TO FEW PAGES FOR TESTING
+// Test configuration - LIMITED TO 3 PAGES
 const CONFIG = {
-  // Scraping parameters
-  category: 'furniture',    // Default test category
-  query: '',                // Default empty, can be provided via CLI
-  maxPages: 3,              // Default: 3 pages for testing
+  // Scraping settings
+  category: 'furniture',    // Test category
+  maxPages: 3,              // *** LIMIT TO 3 PAGES FOR TESTING ***
+  startPage: 1,
   
   // Browser settings
   userDataDir: path.join(__dirname, '../../temp/chrome-data'),
@@ -20,6 +22,7 @@ const CONFIG = {
   // Storage settings
   gcsEnabled: true,
   gcsBucket: 'invaluable-data',
+  batchSize: 3,             // Small batch size for testing
   
   // Rate limiting - faster for testing
   baseDelay: 1500,
@@ -27,47 +30,10 @@ const CONFIG = {
   minDelay: 1000,
   maxRetries: 2,
   
-  // Debug settings
-  debug: false
+  // Checkpoint settings
+  checkpointInterval: 1,    // Save checkpoint after each page
+  checkpointDir: path.join(__dirname, '../../temp/checkpoints'),
 };
-
-// Parse command line arguments
-const parseArgs = () => {
-  const args = {};
-  process.argv.slice(2).forEach(arg => {
-    if (arg.startsWith('--')) {
-      const [key, value] = arg.slice(2).split('=');
-      if (value && value.startsWith('"') && value.endsWith('"')) {
-        // Remove quotes if present
-        args[key] = value.slice(1, -1);
-      } else {
-        args[key] = value || true;
-      }
-    }
-  });
-  return args;
-};
-
-const args = parseArgs();
-console.log('Command line arguments:', args);
-
-// Update config with command line arguments
-if (args.query) {
-  CONFIG.query = args.query;
-  console.log(`Using query: "${CONFIG.query}"`);
-}
-if (args.supercategory) {
-  CONFIG.supercategoryName = args.supercategory;
-  console.log(`Using supercategory: "${CONFIG.supercategoryName}"`);
-}
-if (args.maxPages) {
-  CONFIG.maxPages = parseInt(args.maxPages, 10) || CONFIG.maxPages;
-  console.log(`Using maxPages: ${CONFIG.maxPages}`);
-}
-if (args.debug) {
-  CONFIG.debug = args.debug === 'true';
-  console.log(`Debug mode: ${CONFIG.debug}`);
-}
 
 /**
  * Run test scraper function
@@ -75,90 +41,80 @@ if (args.debug) {
 async function testGcsScraper() {
   console.log('=== STARTING GCS INTEGRATION TEST ===');
   console.log(`Category: ${CONFIG.category}`);
-  console.log(`Query: ${CONFIG.query || '(none)'}`);
   console.log(`Pages to fetch: ${CONFIG.maxPages}`);
   console.log(`GCS Bucket: ${CONFIG.gcsBucket}`);
   
-  // Initialize unified scraper
-  const scraper = new UnifiedScraper({
-    debug: CONFIG.debug,
+  // Initialize browser
+  const browser = new BrowserManager({
+    userDataDir: CONFIG.userDataDir,
     headless: CONFIG.headless,
-    gcsBucket: CONFIG.gcsBucket,
-    baseDelay: CONFIG.baseDelay,
-    maxDelay: CONFIG.maxDelay,
-    minDelay: CONFIG.minDelay,
-    maxRetries: CONFIG.maxRetries,
-    userDataDir: CONFIG.userDataDir
   });
   
   try {
-    await scraper.initialize();
+    await browser.initialize();
     console.log('Browser initialized');
     
-    // Prepare search parameters
-    const searchParams = {
-      query: CONFIG.query || "",
-      supercategoryName: CONFIG.supercategoryName || "",
-      categoryName: CONFIG.category,
-      subcategoryName: CONFIG.subcategoryName || "",
-      priceResult: {
-        min: CONFIG.priceMin || 250,
-        max: CONFIG.priceMax || undefined
-      },
-      upcoming: false
-    };
-    
-    console.log(`Search params: ${JSON.stringify(searchParams)}`);
-    
-    // Execute search with pagination
-    console.log(`Searching with max ${CONFIG.maxPages} pages...`);
-    const results = await scraper.search(searchParams, {
-      maxPages: CONFIG.maxPages,
-      saveToGcs: CONFIG.gcsEnabled,
-      debug: CONFIG.debug
+    // Build search parameters
+    const searchParams = buildSearchParams({ 
+      category: CONFIG.category,
+      sortBy: 'item_title_asc',
     });
     
-    // Print summary
-    if (results?.results?.results?.[0]?.hits) {
-      const hits = results.results.results[0].hits;
-      const meta = results.results.results[0].meta || {};
-      
-      console.log('\n===== TEST COMPLETE =====');
-      console.log(`Category: ${CONFIG.category}`);
-      console.log(`Query: ${CONFIG.query || '(none)'}`);
-      console.log(`Total items found: ${hits.length}`);
-      console.log(`Total hits reported: ${meta.totalHits || 'unknown'}`);
-      
-      if (results.stats) {
-        console.log(`Pages scraped: ${results.stats.pagesScraped}`);
-        console.log(`Processing time: ${results.stats.totalProcessingTime}ms`);
-      }
-      
-      if (CONFIG.gcsEnabled) {
-        console.log(`GCS data saved to: gs://${CONFIG.gcsBucket}/raw/${CONFIG.category}/`);
-      }
-      
-      // Print sample
-      console.log('\n--- SAMPLE ITEMS ---');
-      hits.slice(0, 3).forEach((hit, i) => {
-        console.log(`\n[${i+1}] ${hit.lotTitle}`);
-        console.log(`    Price: ${hit.currencySymbol}${hit.priceResult} ${hit.currencyCode}`);
-        console.log(`    Auction: ${hit.houseName}`);
-        console.log(`    Date: ${hit.dateTimeLocal}`);
-      });
-    } else {
-      console.log('\n❌ NO RESULTS FOUND');
-      console.log('Results structure:', Object.keys(results || {}).join(', '));
+    // Get first page
+    console.log('Fetching first page...');
+    const { results: firstPageResults, initialCookies } = await handleFirstPage(browser, searchParams);
+    
+    if (!firstPageResults || !firstPageResults.results || !firstPageResults.results[0]?.hits) {
+      throw new Error('Failed to get first page results');
     }
     
-    console.log('\n=====================');
-    return results;
+    const totalHits = firstPageResults.results[0].meta?.totalHits || 0;
+    console.log(`Found ${totalHits} total items in category`);
+    
+    // Initialize pagination manager
+    const paginationManager = new PaginationManager({
+      category: CONFIG.category,
+      query: searchParams.keyword || CONFIG.category,
+      maxPages: CONFIG.maxPages,
+      startPage: CONFIG.startPage,
+      checkpointInterval: CONFIG.checkpointInterval,
+      checkpointDir: CONFIG.checkpointDir,
+      gcsEnabled: CONFIG.gcsEnabled,
+      gcsBucket: CONFIG.gcsBucket,
+      // gcsCredentials is not specified - will use Application Default Credentials
+      batchSize: CONFIG.batchSize,
+      baseDelay: CONFIG.baseDelay,
+      maxDelay: CONFIG.maxDelay,
+      minDelay: CONFIG.minDelay,
+      maxRetries: CONFIG.maxRetries,
+    });
+    
+    // Process pagination
+    console.log('Starting pagination process (limited to 3 pages)...');
+    await paginationManager.processPagination(
+      browser,
+      searchParams,
+      firstPageResults,
+      initialCookies
+    );
+    
+    // Print summary statistics
+    const stats = paginationManager.getStats();
+    console.log('\n===== TEST COMPLETE =====');
+    console.log(`Category: ${CONFIG.category}`);
+    console.log(`Total items collected: ${stats.totalItems}`);
+    console.log(`Pages processed: ${stats.completedPages}`);
+    console.log(`GCS data saved to: gs://${CONFIG.gcsBucket}/raw/${CONFIG.category}/`);
+    console.log(`Batches saved: ${stats.batchesSaved}`);
+    console.log('=====================');
+    
+    return stats;
   } catch (error) {
     console.error('Error during test:', error);
     throw error;
   } finally {
     // Always close the browser
-    await scraper.close();
+    await browser.close();
     console.log('Browser closed');
   }
 }

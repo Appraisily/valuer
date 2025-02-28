@@ -2,7 +2,6 @@
  * Módulo para manejar la interceptación de solicitudes HTTP durante la paginación
  */
 const { extractFromApiResponse } = require('./navigation-params');
-const { getTimestamp } = require('./utilities');
 
 // Constantes para URLs
 const API_BASE_URL = 'https://www.invaluable.com';
@@ -22,98 +21,110 @@ const COMMON_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
 };
 
-// Utility functions for logging
-const formatElapsedTime = (startTime) => {
-  const elapsed = Date.now() - startTime;
-  if (elapsed < 1000) return `${elapsed}ms`;
-  if (elapsed < 60000) return `${(elapsed/1000).toFixed(2)}s`;
-  return `${(elapsed/60000).toFixed(2)}min`;
-};
-
 /**
- * Sets up request interception to capture API responses
- * @param {Page} page - Puppeteer page instance
- * @param {Object} navState - Navigation state object to update with response data
- * @param {Number} pageNumber - Page number being processed
+ * Configura la interceptación de solicitudes para la paginación
+ * @param {Object} page - Instancia de la página
+ * @param {Object} navState - Estado de navegación actual
+ * @param {number} pageNum - Número de página actual
+ * @param {Function} onApiResponse - Callback para manejar respuestas API
+ * @returns {Promise<void>}
  */
-const setupRequestInterception = async (page, navState, pageNumber) => {
-  try {
-    // Enable request interception
-    await page.setRequestInterception(true);
+async function setupRequestInterception(page, navState, pageNum, onApiResponse) {
+  await page.setRequestInterception(true);
+  
+  page.on('request', async (req) => {
+    const url = req.url();
     
-    // Set up event listeners for requests
-    page.on('request', async (request) => {
-      try {
-        // Let non-API requests continue normally
-        if (!request.url().includes('/api/search') && !request.url().includes('/api/v2/search')) {
-          await request.continue();
-          return;
-        }
+    // Solo interceptar solicitudes a invaluable.com
+    if (url.includes('invaluable.com')) {
+      // Para solicitudes a la API, modificar o ajustar según sea necesario
+      if (url.includes(CAT_RESULTS_ENDPOINT) || url.includes(SESSION_INFO_ENDPOINT)) {
+        console.log(`📤 Solicitud interceptada a ${url}`);
         
-        console.log(`[${getTimestamp()}] 🔍 Intercepted API request for page ${pageNumber}: ${request.url()}`);
-        
-        // Continue the request
-        await request.continue();
-      } catch (error) {
-        console.error(`[${getTimestamp()}] ❌ Error handling request: ${error.message}`);
-        // If we encounter an error with the request, try to continue anyway
-        try {
-          await request.continue();
-        } catch (continueErr) {
-          // Ignore errors when trying to continue a request that may already be handled
-        }
-      }
-    });
-    
-    // Set up event listeners for responses
-    page.on('response', async (response) => {
-      try {
-        const url = response.url();
-        // Only process API responses
-        if (!url.includes('/api/search') && !url.includes('/api/v2/search')) {
-          return;
-        }
-        
-        const status = response.status();
-        console.log(`[${getTimestamp()}] 📡 Received API response for page ${pageNumber}: ${status} ${url}`);
-        
-        // Process successful responses
-        if (status >= 200 && status < 300) {
-          try {
-            // Get the response body as JSON
-            const responseBody = await response.json();
-            
-            // Update the navigation state with the response data
-            navState.lastResponse = responseBody;
-            console.log(`[${getTimestamp()}] ✅ Successfully parsed API response for page ${pageNumber}`);
-          } catch (jsonErr) {
-            console.error(`[${getTimestamp()}] ⚠️ Failed to parse JSON response: ${jsonErr.message}`);
-            navState.lastResponse = null;
-          }
+        // Si tenemos cookies, añadirlas a la solicitud
+        if (navState.cookies && navState.cookies.length > 0) {
+          const headers = {
+            ...req.headers(),
+            'Cookie': navState.cookies.map(c => `${c.name}=${c.value}`).join('; ')
+          };
+          
+          // Continuar con los headers modificados
+          req.continue({ headers });
         } else {
-          console.error(`[${getTimestamp()}] ⚠️ API request failed with status ${status}`);
-          navState.lastResponse = null;
+          // Continuar normalmente
+          req.continue();
         }
-      } catch (error) {
-        console.error(`[${getTimestamp()}] ❌ Error handling response: ${error.message}`);
-        navState.lastResponse = null;
+      } else if (url.includes('/dist/') || url.includes('/static/')) {
+        // Bloquear recursos estáticos para mejorar rendimiento
+        req.abort();
+      } else {
+        // Otras solicitudes a invaluable.com continúan normalmente
+        req.continue();
       }
-    });
+    } else {
+      // Todas las solicitudes que no son a invaluable.com
+      req.continue();
+    }
+  });
+  
+  // Capturar las respuestas
+  page.on('response', async (response) => {
+    const url = response.url();
+    const status = response.status();
+    const headers = response.headers();
+    const contentType = headers['content-type'] || '';
     
-    // Handle request failures
-    page.on('requestfailed', (request) => {
-      const url = request.url();
-      if (url.includes('/api/search') || url.includes('/api/v2/search')) {
-        console.error(`[${getTimestamp()}] ❌ API request failed for page ${pageNumber}: ${url}`);
-        console.error(`[${getTimestamp()}] ❌ Failure reason: ${request.failure()?.errorText || 'Unknown error'}`);
-        navState.lastResponse = null;
+    // Solo procesar respuestas JSON de invaluable.com
+    if (url.includes('invaluable.com') && contentType.includes('application/json')) {
+      try {
+        const text = await response.text();
+        
+        // Intenta parsear la respuesta como JSON
+        try {
+          const json = JSON.parse(text);
+          console.log(`📥 Respuesta JSON de ${url} (${status})`);
+          
+          // Si es una respuesta de los endpoints que nos interesan
+          if (url.includes(CAT_RESULTS_ENDPOINT)) {
+            console.log(`Respuesta de catResults para página ${pageNum} recibida (${status})`);
+            
+            if (status === 200) {
+              // Extraer parámetros de navegación de la respuesta
+              const extractedParams = extractFromApiResponse(json);
+              
+              // Actualizar el estado de navegación con los parámetros extraídos
+              if (extractedParams.refId) navState.refId = extractedParams.refId;
+              if (extractedParams.searchContext) navState.searchContext = extractedParams.searchContext;
+              if (extractedParams.searcher) navState.searcher = extractedParams.searcher;
+              
+              // Llamar al callback con la respuesta JSON
+              if (onApiResponse) {
+                onApiResponse(json, status);
+              }
+            } else {
+              console.error(`Error al obtener resultados (${status}): ${text}`);
+            }
+          } else if (url.includes(SESSION_INFO_ENDPOINT)) {
+            console.log(`Respuesta de session-info para página ${pageNum} recibida (${status})`);
+            
+            if (status === 200) {
+              // Intentar extraer refId y searchContext de la respuesta
+              const extractedParams = extractFromApiResponse(json);
+              
+              // Actualizar el estado de navegación con los parámetros extraídos
+              if (extractedParams.refId && !navState.refId) navState.refId = extractedParams.refId;
+              if (extractedParams.searchContext && !navState.searchContext) navState.searchContext = extractedParams.searchContext;
+            }
+          }
+        } catch (error) {
+          console.error(`Error al parsear respuesta JSON: ${error.message}`);
+        }
+      } catch (err) {
+        console.error(`Error al leer respuesta: ${err.message}`);
       }
-    });
-  } catch (error) {
-    console.error(`[${getTimestamp()}] ❌ Failed to set up request interception: ${error.message}`);
-    throw error;
-  }
-};
+    }
+  });
+}
 
 /**
  * Construye los headers para una solicitud

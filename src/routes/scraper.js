@@ -1,92 +1,12 @@
 /**
  * Scraper routes - Endpoints to manage data scraping operations
- * Updated to use the UnifiedScraper for all operations
  */
 const express = require('express');
 const router = express.Router();
-const UnifiedScraper = require('../scrapers/invaluable/unified-scraper');
-const SearchStorageService = require('../utils/search-storage');
-
-// Initialize storage service
-const searchStorage = new SearchStorageService();
-
-/**
- * Start a scraping job and return the initial results
- * @param {Object} params - Scraping parameters
- * @param {Object} options - Optional configuration
- * @returns {Promise<Object>} Scraping results and statistics
- */
-async function startScrapingJob(params, options) {
-  console.log(`Starting scraping job for category: ${params.supercategoryName || params.categoryName || 'all'}`);
-  console.log(`Will scrape up to ${options.maxPages} pages`);
-  
-  const scraper = new UnifiedScraper({
-    debug: options.debug || false,
-    headless: options.headless !== false,
-    gcsBucket: options.gcsBucket || 'invaluable-data',
-    baseDelay: options.baseDelay || 2000,
-    maxDelay: options.maxDelay || 10000,
-    minDelay: options.minDelay || 1000,
-    maxRetries: options.maxRetries || 3
-  });
-  
-  try {
-    console.log('Initializing browser...');
-    await scraper.initialize();
-    console.log('Browser initialized for scraping job');
-    
-    console.log(`Getting${options.maxPages > 1 ? ' multiple pages' : ' first page'} of results for ${params.query || 'all items'}...`);
-    
-    // Perform the search with unified scraper
-    const results = await scraper.search(params, options);
-    
-    // Save results if enabled
-    if (options.saveToGcs && results.results?.results?.[0]?.hits?.length > 0) {
-      try {
-        // Format the results for storage
-        const lots = results.results.results[0].hits.map(hit => ({
-          title: hit.lotTitle,
-          date: hit.dateTimeLocal,
-          auctionHouse: hit.houseName,
-          price: {
-            amount: hit.priceResult,
-            currency: hit.currencyCode,
-            symbol: hit.currencySymbol
-          },
-          image: hit.photoPath,
-          lotNumber: hit.lotNumber,
-          saleType: hit.saleType,
-          id: hit.lotId || hit.id,
-          auctionId: hit.saleId,
-          url: hit.itemLink
-        }));
-        
-        // Save to storage
-        const searchId = await searchStorage.saveSearchResults(lots, {
-          query: params.query || '',
-          category: params.supercategoryName || params.categoryName || 'all'
-        });
-        
-        console.log(`Saved ${lots.length} results to storage with ID: ${searchId}`);
-      } catch (storageError) {
-        console.error('Error saving to storage:', storageError);
-      }
-    }
-    
-    return results;
-  } catch (error) {
-    console.error('Error during scraping job:', error);
-    throw error;
-  } finally {
-    // Always close the browser when done
-    try {
-      await scraper.close();
-      console.log('Scraping job browser closed');
-    } catch (closeError) {
-      console.error('Error closing browser:', closeError);
-    }
-  }
-}
+const BrowserManager = require('../scrapers/invaluable/browser');
+const { buildSearchParams } = require('../scrapers/invaluable/utils');
+const { handleFirstPage } = require('../scrapers/invaluable/pagination');
+const PaginationManager = require('../scrapers/invaluable/pagination/pagination-manager');
 
 // Endpoint to start a scraping job
 router.post('/start', express.json(), async (req, res) => {
@@ -95,80 +15,63 @@ router.post('/start', express.json(), async (req, res) => {
     const {
       category = 'furniture',
       query = '',
-      supercategory = null,
-      subcategory = null,
       maxPages = 10,
-      priceMin = 250,
-      priceMax = null,
-      upcoming = false,
+      startPage = 1,
+      batchSize = 100,
       gcsBucket = 'invaluable-data',
-      debug = false,
-      headless = true,
+      baseDelay = 2000,
+      maxDelay = 30000,
+      minDelay = 1000,
       saveToGcs = true
     } = req.body;
     
     // Validate required parameters
-    if (!category && !supercategory && !query) {
+    if (!category) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required parameters',
-        message: 'At least one of: category, supercategory, or query is required'
+        error: 'Missing required parameter',
+        message: 'Category is required'
       });
     }
-    
-    // Build standardized parameters for the UnifiedScraper
-    const scrapingParams = {
-      query,
-      upcoming,
-      priceResult: {
-        min: priceMin,
-        max: priceMax || undefined
-      }
-    };
-    
-    // Handle category parameters with priority
-    if (supercategory) scrapingParams.supercategoryName = supercategory;
-    if (category) scrapingParams.categoryName = category;
-    if (subcategory) scrapingParams.subcategoryName = subcategory;
-    
-    // Options for the scraper
-    const scrapingOptions = {
-      maxPages: parseInt(maxPages, 10),
-      saveToGcs,
-      gcsBucket,
-      debug,
-      headless
-    };
-    
-    // Start scraping asynchronously and send initial response
-    startScrapingJob(scrapingParams, scrapingOptions)
-      .then(results => {
-        console.log(`Scraping job completed successfully, found ${results.results?.results?.[0]?.hits?.length || 0} items`);
-        
-        // Log metrics if available
-        if (results.stats) {
-          console.log(`Processed ${results.stats.pagesScraped || 1} pages in ${results.stats.totalProcessingTime || 0}ms`);
-        }
-      })
-      .catch(error => {
-        console.error('Scraping job failed:', error.message);
-      });
     
     // Return immediate response to client
     res.json({
       success: true,
-      message: 'Scraping job started successfully',
-      parameters: scrapingParams,
-      options: scrapingOptions
+      message: 'Scraping job started',
+      jobDetails: {
+        category,
+        query,
+        maxPages,
+        startPage,
+        saveToGcs,
+        gcsBucket: saveToGcs ? gcsBucket : null,
+        estimatedTimeMinutes: Math.ceil(maxPages * baseDelay / 60000)
+      }
+    });
+    
+    // Continue processing in the background after response is sent
+    startScrapingJob({
+      category,
+      query,
+      maxPages,
+      startPage,
+      batchSize,
+      gcsBucket,
+      baseDelay,
+      maxDelay,
+      minDelay,
+      saveToGcs
     });
     
   } catch (error) {
-    console.error('Error handling scraper request:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Server error',
-      message: error.message
-    });
+    console.error('Error starting scraper job:', error);
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to start scraping job',
+        message: error.message
+      });
+    }
   }
 });
 
@@ -181,5 +84,87 @@ router.get('/status/:jobId', async (req, res) => {
     jobId: req.params.jobId
   });
 });
+
+/**
+ * Start a scraping job in the background
+ */
+async function startScrapingJob(config) {
+  console.log(`Starting scraping job for category: ${config.category}`);
+  console.log(`Will scrape up to ${config.maxPages} pages`);
+  
+  // Initialize browser
+  const browser = new BrowserManager();
+  
+  try {
+    await browser.initialize();
+    console.log('Browser initialized for scraping job');
+    
+    // Build search parameters
+    const searchParams = buildSearchParams({
+      category: config.category,
+      keyword: config.query,
+      sortBy: 'item_title_asc'  // Consistent ordering helps with pagination
+    });
+    
+    // Get first page of results
+    console.log(`Getting first page of results for ${config.category}...`);
+    const { results: firstPageResults, initialCookies } = await handleFirstPage(browser, searchParams);
+    
+    if (!firstPageResults || !firstPageResults.results || !firstPageResults.results[0]?.hits) {
+      throw new Error('Failed to get first page results');
+    }
+    
+    const totalHits = firstPageResults.results[0].meta?.totalHits || 0;
+    console.log(`Found ${totalHits} total items in ${config.category}`);
+    
+    // Initialize pagination manager
+    const paginationManager = new PaginationManager({
+      category: config.category,
+      query: config.query || config.category,
+      maxPages: config.maxPages,
+      startPage: config.startPage,
+      checkpointInterval: 5,
+      gcsEnabled: config.saveToGcs,
+      gcsBucket: config.gcsBucket,
+      batchSize: config.batchSize,
+      baseDelay: config.baseDelay,
+      maxDelay: config.maxDelay,
+      minDelay: config.minDelay
+    });
+    
+    // Process pagination
+    console.log('Starting pagination process...');
+    const results = await paginationManager.processPagination(
+      browser,
+      searchParams,
+      firstPageResults,
+      initialCookies
+    );
+    
+    // Print summary statistics
+    const stats = paginationManager.getStats();
+    console.log('\n===== SCRAPING JOB COMPLETE =====');
+    console.log(`Category: ${config.category}`);
+    console.log(`Total items collected: ${stats.totalItems}`);
+    console.log(`Pages processed: ${stats.completedPages} of ${Math.min(Math.ceil(totalHits / 96), config.maxPages)}`);
+    console.log(`Failed pages: ${stats.failedPages}`);
+    console.log(`Success rate: ${stats.successRate}`);
+    console.log(`Total time: ${stats.runningTimeMin.toFixed(2)} minutes`);
+    
+    if (config.saveToGcs) {
+      console.log(`GCS data path: gs://${config.gcsBucket}/raw/${config.category}/`);
+      console.log(`Batches saved: ${stats.batchesSaved}`);
+    }
+    
+    return stats;
+  } catch (error) {
+    console.error('Error during scraping job:', error);
+    throw error;
+  } finally {
+    // Always close the browser
+    await browser.close();
+    console.log('Scraping job browser closed');
+  }
+}
 
 module.exports = router; 

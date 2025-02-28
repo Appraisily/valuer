@@ -1,7 +1,6 @@
 /**
  * Utilidades para el scraper de Invaluable
  */
-const { constructSearchUrl } = require('./url-builder');
 
 /**
  * Valida y formatea las cookies para que estén listas para usar
@@ -161,49 +160,12 @@ function detectCookieChanges(oldCookies, newCookies) {
   return hasCookiesChanged;
 }
 
-/**
- * Builds search parameters for the Invaluable API
- * @param {Object} params - Search parameters
- * @returns {Object} Formatted search parameters
- */
-function buildSearchParams(params = {}) {
-  // Create a deep copy of the params to avoid modifying the original
-  const formattedParams = { ...params };
-  
-  // Ensure defaults for critical parameters
-  formattedParams.query = params.query || '';
-  
-  // If supercategoryName is provided but not categoryName or subcategoryName, 
-  // set them to empty strings to ensure proper URL construction
-  if (params.supercategoryName && !params.categoryName) {
-    formattedParams.categoryName = '';
-  }
-  if ((params.supercategoryName || params.categoryName) && !params.subcategoryName) {
-    formattedParams.subcategoryName = '';
-  }
-  
-  // Set default sort if not provided
-  if (!params.sort) {
-    formattedParams.sort = 'sale_date|desc';
-  }
-  
-  // Handle pagination
-  if (params.page && Number(params.page) > 0) {
-    formattedParams.page = Number(params.page);
-  } else {
-    formattedParams.page = 1;
-  }
-  
-  return formattedParams;
-}
-
 // Exportamos las funciones de utilidad
 module.exports = {
   formatCookies,
   extractMetadata,
   randomWait,
   detectCookieChanges,
-  buildSearchParams,
   
   // Reexportamos funciones existentes si las hay
   ...require('./utils')

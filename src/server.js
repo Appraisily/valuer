@@ -1,9 +1,7 @@
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const searchRouter = require('./routes/search');
 const scraperRouter = require('./routes/scraper');
-const unifiedSearchRouter = require('./routes/unified-search');
 const InvaluableScraper = require('./scrapers/invaluable');
 
 const port = process.env.PORT || 8080;
@@ -32,13 +30,9 @@ app.get('/', (req, res) => {
   res.json({ status: 'ok', message: 'Invaluable Search API is running' });
 });
 
-// Serve client interceptor tool
-app.use(express.static(path.join(__dirname, '../public')));
-
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json());
 
-// Lazy initialization of the scraper
 async function initializeScraper() {
   if (isInitializing) {
     while (isInitializing) {
@@ -47,12 +41,8 @@ async function initializeScraper() {
     return;
   }
 
-  if (invaluableScraper.initialized) {
-    return;
-  }
-
   isInitializing = true;
-  console.log('Starting Invaluable scraper initialization on demand...');
+  console.log('Starting Invaluable scraper initialization...');
 
   try {
     await invaluableScraper.initialize();
@@ -66,27 +56,13 @@ async function initializeScraper() {
   }
 }
 
-// Set up middleware to initialize scraper only when needed
-app.use('/api/search', async (req, res, next) => {
-  try {
-    await initializeScraper();
-    next();
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: 'Failed to initialize scraper',
-      message: error.message
-    });
-  }
-});
-
-// Initialize routes without starting the scraper automatically
+// Initialize scraper and set up routes
 async function startServer() {
   try {
-    // Set up routes
+    await initializeScraper();
+    
     app.use('/api/search', searchRouter);
     app.use('/api/scraper', scraperRouter);
-    app.use('/api/unified-search', unifiedSearchRouter);
     
     const server = app.listen(port, '0.0.0.0', () => {
       console.log(`Server is now listening on port ${port}`);

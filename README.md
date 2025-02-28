@@ -1,214 +1,308 @@
-# Invaluable Scraper API
+# Valuer - Invaluable Search API & Enhanced Scraper
 
-A powerful API service that provides structured data from Invaluable auction listings with pagination support and configurable options.
+A specialized Node.js tool for accessing and extracting data from Invaluable's auction listings. The project consists of two main components:
 
-## Deployment
+1. **API Service**: A RESTful API that intercepts and returns raw JSON responses from Invaluable's search endpoints
+2. **Enhanced Scraper**: A robust scraper with pagination support and Google Cloud Storage integration
 
-The service is deployed at: https://valuer-dev-856401495068.us-central1.run.app
+## Overview
 
-## Architecture Overview
+This project provides powerful tools for searching and collecting data from Invaluable's catalog by:
+- Automating browser interactions with Puppeteer
+- Managing required cookies, headers and authentication
+- Intercepting and capturing JSON responses
+- Handling protection challenges
+- Supporting comprehensive search parameters
+- Enabling large-scale data collection with resumable operations
 
-The application is built with Node.js and Express, and uses Puppeteer for browser automation. The core components are:
+## Features
 
-- **Unified Scraper**: Central scraping engine that handles browser management, URL construction, and pagination.
-- **Search API**: REST endpoints for searching auction data.
-- **Storage Service**: Optional storage of search results to Google Cloud Storage.
+### API Service
 
-## How It Works: catResults Interception
+#### Core Functionality
+- **Dynamic Parameter Support**
+  - Accepts all Invaluable search parameters
+  - Constructs proper search URLs
+  - Maintains query parameter integrity
+  - Supports price range filtering with `priceResult[min]` and `priceResult[max]`
 
-This API uses a sophisticated approach to extract data from Invaluable:
+- **Browser Automation**
+  - Puppeteer with Stealth Plugin
+  - Cookie management
+  - Request interception
+  - Resource optimization
+  - Protection handling
 
-1. **Request Interception**: The system uses Puppeteer to create an automated browser session to Invaluable's website.
+- **Response Capture**
+  - JSON response interception
+  - Response validation
+  - Error handling
+  - Size-based filtering
+  - Detailed logging of result counts
 
-2. **catResults Capture**: The API intercepts the JSON responses from Invaluable's internal `/catResults` endpoint, which contains the raw auction data.
+#### Technical Features
+- **Browser Management**
+  - Multi-tab processing
+  - Resource blocking
+  - Request interception
+  - Human behavior simulation:
+    - Random mouse movements
+    - Natural scrolling patterns
+    - Realistic timing delays
+    - Dynamic viewport handling
 
-3. **Pagination Handling**: When `fetchAllPages=true` is specified:
-   - The API first captures the initial page of results
-   - It then automatically navigates through subsequent pages (up to the `maxPages` limit)
-   - For each page, it intercepts the `/catResults` response
-   - All pages are combined into a single comprehensive response
+- **API Features**
+  - RESTful endpoint at `/api/search`
+  - Dynamic parameter support
+  - Real-time response capture
+  - Comprehensive error handling
+  - Detailed response logging
 
-4. **Data Processing**: The raw JSON data from the catResults endpoint is processed and standardized to provide a consistent response format.
+### Enhanced Scraper
 
-5. **Response Format**: The final response includes all auction lots from all fetched pages, with detailed information about each item.
+- **Resumable Pagination**: Can stop and resume scraping at any point
+- **Progress Tracking**: Detailed statistics and checkpoints
+- **Adaptive Rate Limiting**: Smart delays to avoid detection
+- **Fault Tolerance**: Auto-retry with exponential backoff
+- **Google Cloud Storage Integration**: Store results directly to GCS
 
-## Installation
+## Prerequisites
 
-```bash
-# Clone the repository
-git clone <repository-url>
-
-# Navigate to the project directory
-cd invaluable-scraper
-
-# Install dependencies
-npm install
-```
+- Node.js (v14 or higher, v18+ recommended)
+- Google Cloud SDK (for GCS integration and deployment)
+- Docker (for containerization)
 
 ## Environment Variables
 
-Create a `.env` file in the root directory with the following variables:
-
+Required variables in `.env`:
 ```
-PORT=8080
-GCS_BUCKET=invaluable-data
-DEBUG=false
-HEADLESS=true
+GOOGLE_CLOUD_PROJECT=your-project-id
+STORAGE_BUCKET=invaluable-html-archive
 ```
 
-## Running the Application
+## Installation
 
+1. Clone the repository:
 ```bash
-# Start the server
-npm start
-
-# Or with nodemon for development
-npm run dev
+git clone https://github.com/yourusername/valuer.git
+cd valuer
 ```
 
-## API Endpoints
+2. Install dependencies:
+```bash
+npm install
+```
 
-### Unified Search Endpoint
+3. Create a `.env` file based on the example:
+```bash
+cp .env.example .env
+# Edit .env with your configuration
+```
 
-`GET /api/unified-search`
+4. Start the API server:
+```bash
+npm start
+```
 
-The unified search endpoint provides a consistent interface for all search operations with proper parameter handling.
+## API Documentation
+
+### Search Endpoint
+
+```
+GET /api/search
+```
 
 #### Query Parameters
+| Parameter | Description | Example |
+|-----------|-------------|---------|
+| `query` | Main search query | "Antique Victorian mahogany" |
+| `keyword` | Additional keyword filter | "dining table" |
+| `supercategoryName` | Category name | "Furniture", "Fine Art" |
+| `priceResult[min]` | Minimum price | 1750 |
+| `priceResult[max]` | Maximum price | 3250 |
+| `houseName` | Auction house name | "DOYLE Auctioneers" |
+| `upcoming` | Filter for upcoming auctions | true/false |
 
-| Parameter | Type | Description | Default |
-|-----------|------|-------------|---------|
-| query | string | Search query | "" |
-| supercategory | string | Super category name | null |
-| category | string | Category name | null |
-| subcategory | string | Sub-category name | null |
-| upcoming | boolean | Include upcoming auctions | false |
-| priceResult[min] | number | Minimum price | 250 |
-| priceResult[max] | number | Maximum price | null |
-| fetchAllPages | boolean | Fetch multiple pages | false |
-| maxPages | number | Maximum pages to fetch | 1 |
-| saveToGcs | boolean | Save results to GCS | false |
-| debug | boolean | Enable debug logging | false |
+#### Example Requests
+```bash
+# Basic search
+curl "http://localhost:8080/api/search?query=furniture"
 
-#### Example Request
+# Search with price range
+curl "http://localhost:8080/api/search?query=furniture&priceResult%5Bmin%5D=1750&priceResult%5Bmax%5D=3250"
 
-```
-GET /api/unified-search?query=antique&supercategory=Furniture&maxPages=5&saveToGcs=true
+# Search specific items
+curl "http://localhost:8080/api/search?query=Antique+Victorian+mahogany+dining+table&priceResult%5Bmin%5D=1750&priceResult%5Bmax%5D=3250"
+
+# Search specific auction house
+curl "http://localhost:8080/api/search?houseName=DOYLE%20Auctioneers%20%26%20Appraisers&query=antique"
 ```
 
 #### Example Response
-
 ```json
 {
   "success": true,
-  "timestamp": "2023-03-15T12:34:56.789Z",
+  "timestamp": "2024-02-14T12:34:56.789Z",
   "parameters": {
-    "query": "antique",
-    "supercategoryName": "Furniture",
-    "upcoming": false
-  },
-  "pagination": {
-    "totalItems": 1250,
-    "totalPages": 13,
-    "itemsPerPage": 96,
-    "currentPage": 1
-  },
-  "stats": {
-    "totalProcessingTime": 5432,
-    "pagesScraped": 5
+    "query": "Antique Victorian mahogany dining table",
+    "priceResult": {
+      "min": "1750",
+      "max": "3250"
+    }
   },
   "data": {
-    "lots": [
-      {
-        "title": "Antique Victorian Mahogany Side Table",
-        "date": "2023-04-01T14:00:00Z",
-        "auctionHouse": "Example Auction House",
-        "price": {
-          "amount": 1200,
-          "currency": "USD",
-          "symbol": "$"
-        },
-        "image": "https://example.com/images/table.jpg",
-        "lotNumber": "123",
-        "saleType": "Auction",
-        "id": "abc123",
-        "auctionId": "xyz789",
-        "url": "https://example.com/lot/abc123"
-      },
-      // More lots...
-    ],
-    "totalResults": 480
-  },
-  "timing": {
-    "totalTime": 6789,
-    "timeUnit": "ms"
+    "lots": [...],
+    "totalResults": 42
   }
 }
 ```
 
-### Legacy Endpoints
+## Enhanced Scraper Usage
 
-The application maintains backward compatibility with legacy endpoints:
+The enhanced scraper provides tools for large-scale data collection with resilient pagination handling.
 
-- `GET /api/search` - Original search endpoint
-- `POST /api/scraper/start` - Start a scraping job
+### Storage Structure
 
-## Advanced Usage
-
-### API Commands
-
-```bash
-# Example command to fetch 5 pages of auction data
-curl -X POST https://valuer-dev-856401495068.us-central1.run.app/api/scraper/start \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "antique",
-    "supercategory": "Furniture",
-    "maxPages": 5,
-    "priceMin": 250,
-    "priceMax": 5000,
-    "saveToGcs": true,
-    "gcsBucket": "invaluable-data",
-    "headless": true
-  }'
+```
+gs://invaluable-data/
+  └── raw/
+      └── [category]/
+          ├── metadata.json       # Collection info, statistics
+          ├── page_001-100.json   # Batched page results
+          ├── page_101-200.json   # Batched page results
+          └── ...
 ```
 
-### Running Tests
+### Configuration
+
+Edit `src/examples/invaluable-category-scraper.js` to customize:
+
+- Category to scrape
+- Maximum pages
+- Batch size
+- Rate limiting parameters
+- Google Cloud Storage settings
+
+### Running the Scraper
+
+Run the example scraper:
 
 ```bash
-# Run tests
-npm test
-
-# Run GCS scraper test with specific parameters
-npm run test:gcs -- --query="antique" --supercategory="Furniture" --maxPages=5
+npm start
 ```
 
-### Example Scripts
+Or programmatically:
 
-The repository includes example scripts to demonstrate key functionality:
+```javascript
+const PaginationManager = require('./src/scrapers/invaluable/pagination/pagination-manager');
 
+// Initialize the pagination manager
+const paginationManager = new PaginationManager({
+  category: 'furniture',
+  maxPages: 4000,
+  gcsEnabled: true,
+  gcsBucket: 'invaluable-data',
+  batchSize: 100,
+});
+
+// Use it in your scraper
+const results = await paginationManager.processPagination(
+  browser,
+  searchParams,
+  firstPageResults,
+  initialCookies
+);
+```
+
+## Deployment
+
+### Docker
+
+Build the image:
 ```bash
-# Run the unified scraper example (Windows)
-run-unified-scraper.bat "antique tables" "Furniture" 3
-
-# Test the catResults interception (Windows)
-run-catresults-interception.bat "antique chairs" "Furniture"
+docker build -t valuer .
 ```
 
-### Debugging
+Run locally:
+```bash
+docker run -p 8080:8080 \
+  -e GOOGLE_CLOUD_PROJECT=your-project-id \
+  valuer
+```
 
-Set the `DEBUG` environment variable to `true` to enable detailed logging.
+### Google Cloud Run
 
-## Improvements
+Deploy using Cloud Build:
+```bash
+gcloud builds submit --config cloudbuild.yaml
+```
 
-The latest changes include:
+## Project Structure
 
-1. **Unified Parameter Handling**: Consistent parameter handling across all endpoints
-2. **Proper URL Construction**: URLs are built with all required parameters
-3. **Centralized Browser Management**: Browser instances are managed efficiently
-4. **Standardized Response Format**: Consistent response structure for all endpoints
-5. **Enhanced Request Interception**: Reliable capture of catResults responses
+```
+├── src/
+│   ├── server.js                     # Express server setup
+│   ├── examples/
+│   │   └── invaluable-category-scraper.js  # Example scraper
+│   ├── scrapers/
+│   │   └── invaluable/
+│   │       ├── index.js              # Main scraper class
+│   │       ├── browser.js            # Browser management
+│   │       ├── auth.js               # Authentication handling
+│   │       └── pagination/           # Pagination handling
+│   │           └── pagination-manager.js  # Pagination manager
+│   ├── routes/
+│   │   └── search.js                 # Search endpoint
+│   └── utils/                        # Utility functions
+├── Dockerfile                         # Container configuration
+├── cloudbuild.yaml                    # Cloud Build config
+└── package.json                       # Dependencies
+```
+
+## Error Handling
+
+The system handles various error scenarios:
+- Network timeouts
+- Protection challenges
+- API failures
+- Invalid responses
+- Rate limiting
+- Browser errors
+
+## Troubleshooting
+
+- **Rate limiting issues**: Try increasing the `baseDelay` and `maxDelay` parameters
+- **Connection errors**: The scraper has built-in retry logic, but persistent issues may require proxy rotation
+- **GCS permissions**: Ensure your service account has proper permissions for the bucket
+
+## Google Cloud Storage Integration
+
+### Using Existing Service Account Credentials
+
+If you're already using a Google Cloud service account in your application, you can use the same credentials for the scraper:
+
+1. **Using Application Default Credentials**: If your application is already authenticated (running on GCP or using ADC), the scraper will automatically use these credentials.
+
+2. **Using an Existing Service Account**: Modify the configuration to include your credentials:
+
+```javascript
+// In your configuration:
+const CONFIG = {
+  // ...other settings
+  gcsEnabled: true,
+  gcsBucket: 'your-bucket-name',
+  gcsCredentials: require('./path/to/service-account.json') // Or pass credentials object directly
+};
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 
-[MIT License](LICENSE)
+MIT License
