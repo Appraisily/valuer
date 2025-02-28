@@ -51,6 +51,7 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
   const processedIds = new Set();
   const successfulPages = new Set([1]); // La página 1 ya está procesada
   const failedPages = new Set();
+  let skippedExistingPages = 0; // Contador para páginas omitidas por ya existir
   
   // Sanitizar cookies iniciales o usar las cookies recibidas en la respuesta
   let cookiesState;
@@ -161,6 +162,21 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
       if (successfulPages.has(pageNum)) {
         console.log(`Página ${pageNum} ya procesada, saltando`);
         continue;
+      }
+      
+      // Verificar si la página ya existe en GCS (para reanudación)
+      try {
+        const category = params.query || 'uncategorized';
+        const pageExists = await searchStorage.pageResultsExist(category, pageNum);
+        if (pageExists) {
+          console.log(`Página ${pageNum} ya existe en GCS, saltando`);
+          successfulPages.add(pageNum);
+          skippedExistingPages++; // Incrementar contador de páginas omitidas
+          continue;
+        }
+      } catch (checkError) {
+        console.warn(`⚠️ Error al verificar si la página ${pageNum} existe: ${checkError.message}`);
+        // Continuar procesando la página incluso si hay error al verificar
       }
       
       console.log(`\n----- Procesando página ${pageNum} de ${pagesToProcess} -----`);
@@ -337,12 +353,14 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
     // Añadir información de paginación al resultado
     allResults.pagesRetrieved = Array.from(successfulPages);
     allResults.failedPages = Array.from(failedPages);
+    allResults.skippedExistingPages = skippedExistingPages;
     allResults.totalPagesFound = totalPages;
     allResults.finalCookies = navState.cookies;
     
     console.log(`\n===== Resultados finales =====`);
     console.log(`✅ Total de resultados obtenidos: ${allResults.results[0].hits.length}`);
     console.log(`✅ Páginas procesadas con éxito: ${successfulPages.size}`);
+    console.log(`ℹ️ Páginas omitidas (ya existentes en GCS): ${skippedExistingPages}`);
     console.log(`❌ Páginas con errores: ${failedPages.size}`);
   }
   
