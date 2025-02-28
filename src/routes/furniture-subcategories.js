@@ -151,7 +151,7 @@ router.get('/scrape/:subcategory', async (req, res) => {
     
     // Parse request parameters
     const startPage = parseInt(req.query.startPage) || 1;
-    const maxPages = parseInt(req.query.maxPages) || Math.ceil(subcategoryInfo.count / 96); // Default to all pages
+    let maxPages = parseInt(req.query.maxPages) || 0; // Default to 0, will be determined from API response
     const fetchAllPages = req.query.fetchAllPages !== 'false'; // Default to true
     
     // Get cookies from request if provided
@@ -174,6 +174,44 @@ router.get('/scrape/:subcategory', async (req, res) => {
     const searchParams = buildSubcategoryParams(subcategoryName, startPage);
     
     console.log(`Starting scrape for furniture subcategory: ${subcategoryName}`);
+    
+    // If maxPages is not specified, first make a single page request to get the total pages
+    if (maxPages <= 0 && fetchAllPages) {
+      console.log(`No maxPages specified. Making initial request to determine total pages...`);
+      
+      // Make a single page request to get metadata
+      const initialResult = await invaluableScraper.search(searchParams, cookies);
+      
+      if (!initialResult || !initialResult.results || !initialResult.results[0] || !initialResult.results[0].meta) {
+        return res.status(404).json({
+          success: false,
+          error: 'Failed to get pagination metadata',
+          message: 'Could not determine total pages from API response.'
+        });
+      }
+      
+      // Extract total pages from the metadata
+      const totalHits = initialResult.results[0].meta.totalHits || 0;
+      const hitsPerPage = initialResult.results[0].meta.hitsPerPage || 96;
+      maxPages = Math.ceil(totalHits / hitsPerPage);
+      
+      console.log(`API reports ${totalHits} total items across ${maxPages} pages for subcategory "${subcategoryName}"`);
+      
+      // If we already retrieved page 1, we can use it as the first page result
+      if (startPage === 1) {
+        // Save the first page results - the scraper will skip it if it exists
+        try {
+          await searchStorage.savePageResults('furniture', 1, initialResult, subcategoryName);
+          console.log(`Saved initial page results for subcategory "${subcategoryName}"`);
+        } catch (error) {
+          console.warn(`Warning: Could not save initial page results: ${error.message}`);
+        }
+      }
+    } else if (maxPages <= 0) {
+      // If fetchAllPages is false but no maxPages specified, default to 1
+      maxPages = 1;
+    }
+    
     console.log(`Parameters: startPage=${startPage}, maxPages=${maxPages}, fetchAllPages=${fetchAllPages}`);
     
     // Start the search
@@ -194,6 +232,7 @@ router.get('/scrape/:subcategory', async (req, res) => {
       message: `Subcategory "${subcategoryName}" scraping completed`,
       resultSummary: {
         totalHits: result.results?.[0]?.meta?.totalHits || 0,
+        totalPages: maxPages,
         resultsCount: result.results?.[0]?.hits?.length || 0,
         pagesProcessed: result.pagesRetrieved || 1,
         skippedPages: result.skippedExistingPages || 0

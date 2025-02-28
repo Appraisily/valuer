@@ -141,7 +141,7 @@ router.get('/', async (req, res) => {
     delete searchParams.fetchAllPages;
     
     // Get max pages to fetch if specified
-    const maxPages = parseInt(req.query.maxPages) || 10;
+    const maxPages = parseInt(req.query.maxPages) || 0; // Default to 0, will be determined from API response
     delete searchParams.maxPages;
     
     // Check if we should save to GCS
@@ -154,19 +154,74 @@ router.get('/', async (req, res) => {
     console.log('Starting search with parameters:', searchParams);
     
     let result;
+    let finalMaxPages = maxPages;
+    
     if (fetchAllPages) {
-      console.log(`Fetching all pages (up to ${maxPages})`);
-      result = await invaluableScraper.searchAllPages(searchParams, cookies, maxPages);
+        if (maxPages <= 0) {
+            // If no maxPages specified, first make a single page request to get the total pages
+            console.log('No maxPages specified. Making initial request to determine total pages...');
+            
+            // Make a single page request to get metadata
+            const initialResult = await invaluableScraper.search(searchParams, cookies);
+            
+            if (initialResult && initialResult.results && initialResult.results[0] && initialResult.results[0].meta) {
+                // Extract total pages from the metadata
+                const totalHits = initialResult.results[0].meta.totalHits || 0;
+                const hitsPerPage = initialResult.results[0].meta.hitsPerPage || 96;
+                finalMaxPages = Math.ceil(totalHits / hitsPerPage);
+                
+                console.log(`API reports ${totalHits} total items across ${finalMaxPages} pages`);
+                
+                // If we don't need to paginate further, use the initial result
+                if (finalMaxPages <= 1) {
+                    result = initialResult;
+                    console.log('Only one page of results available, no need for pagination');
+                } else {
+                    // Save the first page results if saveToGcs is enabled
+                    if (saveToGcs) {
+                        try {
+                            const formattedResults = formatSearchResults(initialResult);
+                            const standardizedResponse = standardizeResponse(formattedResults, {
+                                ...searchParams,
+                                fetchAllPages: 'true',
+                                maxPages: finalMaxPages,
+                                saveToGcs: 'true'
+                            });
+                            
+                            await searchStorage.savePageResults(category, 1, standardizedResponse);
+                            console.log(`Saved initial page results to GCS for category "${category}"`);
+                        } catch (error) {
+                            console.warn(`Warning: Could not save initial page results: ${error.message}`);
+                        }
+                    }
+                    
+                    // Proceed with fetching all pages
+                    console.log(`Fetching all pages (up to ${finalMaxPages})`);
+                    result = await invaluableScraper.searchAllPages(searchParams, cookies, finalMaxPages);
+                }
+            } else {
+                console.warn('Could not determine total pages from API response, using default');
+                finalMaxPages = 10; // Default if metadata not available
+                console.log(`Fetching all pages (up to ${finalMaxPages})`);
+                result = await invaluableScraper.searchAllPages(searchParams, cookies, finalMaxPages);
+            }
+        } else {
+            // Use user-specified maxPages
+            finalMaxPages = maxPages;
+            console.log(`Fetching all pages (up to ${finalMaxPages})`);
+            result = await invaluableScraper.searchAllPages(searchParams, cookies, finalMaxPages);
+        }
     } else {
-      result = await invaluableScraper.search(searchParams, cookies);
+        // Just fetch a single page
+        result = await invaluableScraper.search(searchParams, cookies);
     }
     
     if (!result) {
-      return res.status(404).json({
-        success: false,
-        error: 'No search results found',
-        message: 'The search did not return any results. Try different parameters or check that the cookies are valid.'
-      });
+        return res.status(404).json({
+            success: false,
+            error: 'No search results found',
+            message: 'The search did not return any results. Try different parameters or check that the cookies are valid.'
+        });
     }
     
     const formattedResults = formatSearchResults(result);
@@ -180,9 +235,19 @@ router.get('/', async (req, res) => {
     const standardizedResponse = standardizeResponse(formattedResults, {
       ...searchParams,
       fetchAllPages: fetchAllPages ? 'true' : 'false',
-      maxPages: maxPages,
+      maxPages: finalMaxPages,
       saveToGcs: saveToGcs ? 'true' : 'false'
     });
+    
+    // Add additional information about scraping process if available
+    if (result.pagesRetrieved || result.skippedExistingPages) {
+      standardizedResponse.scrapingSummary = {
+        pagesProcessed: result.pagesRetrieved || 1,
+        skippedExistingPages: result.skippedExistingPages || 0,
+        totalPagesFound: finalMaxPages,
+        automaticPagination: maxPages <= 0 && fetchAllPages
+      };
+    }
     
     // Save to GCS if enabled
     if (saveToGcs) {

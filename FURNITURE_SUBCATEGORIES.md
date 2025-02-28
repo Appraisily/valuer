@@ -48,8 +48,25 @@ GET /api/furniture/scrape/:subcategory?startPage=1&maxPages=100&fetchAllPages=tr
 
 Parameters:
 - `startPage`: The page to start scraping from (default: 1)
-- `maxPages`: Maximum number of pages to scrape (default: calculated from item count)
+- `maxPages`: Maximum number of pages to scrape (optional - will auto-determine if not provided)
 - `fetchAllPages`: Whether to fetch all pages or just the first one (default: true)
+
+#### Automatic Pagination
+
+The subcategory scraper now supports automatic pagination - you don't need to specify the maxPages parameter:
+
+```bash
+curl "https://valuer-dev-856401495068.us-central1.run.app/api/furniture/scrape/Chairs?fetchAllPages=true"
+```
+
+When no maxPages parameter is provided, the system will:
+1. Make an initial API request to determine the total number of items and pages
+2. Automatically calculate the correct number of pages to scrape
+3. Begin scraping from the specified startPage (or page 1 by default)
+4. Skip any pages that already exist in Google Cloud Storage
+5. Return a summary with the total pages found, pages processed, and pages skipped
+
+This means you no longer need to know how many pages each subcategory has in advance - the system will figure it out automatically.
 
 ## Example Usage
 

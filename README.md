@@ -34,6 +34,13 @@ This API provides a simple interface to search Invaluable's catalog by:
   - Size-based filtering
   - Detailed logging of result counts
 
+- **Automatic Pagination**
+  - Dynamically determines total number of pages from initial API response
+  - Automatically scrapes all available pages without requiring `maxPages` parameter
+  - Skips already processed pages when resuming interrupted scraping sessions
+  - Reports comprehensive statistics including total items, pages processed, and pages skipped
+  - Optimizes first page processing by using metadata from initial request
+
 ### Technical Features
 
 #### Browser Management
@@ -102,7 +109,8 @@ Query Parameters:
 - `houseName`: Auction house name
 - `upcoming`: Filter for upcoming auctions (true/false)
 - `fetchAllPages`: Set to `true` to automatically fetch all pages of results
-- `maxPages`: Maximum number of pages to fetch when using `fetchAllPages` (default: 10)
+- `maxPages`: Maximum number of pages to fetch when using `fetchAllPages` (optional, system will auto-determine if not provided)
+- `saveToGcs`: Set to `true` to save results to Google Cloud Storage
 
 Example Requests:
 ```bash
@@ -118,43 +126,62 @@ curl "http://localhost:8080/api/search?query=Antique+Victorian+mahogany+dining+t
 # Search specific auction house
 curl "http://localhost:8080/api/search?houseName=DOYLE%20Auctioneers%20%26%20Appraisers&query=antique"
 
-# Search with pagination to get multiple pages
+# Search with pagination - specify max pages
 curl "https://valuer-dev-856401495068.us-central1.run.app/api/search?query=furniture&fetchAllPages=true&maxPages=3"
+
+# Search with automatic pagination - system determines total pages
+curl "https://valuer-dev-856401495068.us-central1.run.app/api/search?query=furniture&fetchAllPages=true"
 ```
 
 ### Pagination and Data Interception Process
 
-When using the endpoint with pagination parameters (like `https://valuer-dev-856401495068.us-central1.run.app/api/search?query=furniture&fetchAllPages=true&maxPages=3`), the API works as follows:
+When using the endpoint with pagination parameters (like `https://valuer-dev-856401495068.us-central1.run.app/api/search?query=furniture&fetchAllPages=true`), the API works as follows:
 
 1. **Request Interception**: The system uses Puppeteer to create an automated browser session to Invaluable's website.
 
-2. **catResults Capture**: The API intercepts the JSON responses from Invaluable's internal `/catResults` endpoint, which contains the raw auction data.
+2. **Initial Page Metadata**: If no `maxPages` parameter is provided, the system first makes a request to fetch just the first page of results to extract metadata about total items and number of pages.
 
-3. **Pagination Handling**: When `fetchAllPages=true` is specified:
+3. **Automatic Pagination**: Based on the metadata from the first page, the system calculates the total number of pages available (typically around 96 items per page) and sets this as the `maxPages` value.
+
+4. **catResults Capture**: The API intercepts the JSON responses from Invaluable's internal `/catResults` endpoint, which contains the raw auction data.
+
+5. **Skip Processing**: The system checks if each page has already been processed and stored in Google Cloud Storage, allowing it to skip reprocessing of existing pages when resuming interrupted scraping jobs.
+
+6. **Pagination Handling**: 
    - The API first captures the initial page of results
-   - It then automatically navigates through subsequent pages (up to the `maxPages` limit)
+   - It then automatically navigates through subsequent pages (up to the calculated total pages)
    - For each page, it intercepts the `/catResults` response
    - All pages are combined into a single comprehensive response
 
-4. **Data Processing**: The raw JSON data from the catResults endpoint is processed and standardized to provide a consistent response format.
+7. **Data Processing**: The raw JSON data from the catResults endpoint is processed and standardized to provide a consistent response format.
 
-5. **Response Format**: The final response includes all auction lots from all fetched pages, with detailed information about each item.
+8. **Response Format**: The final response includes all auction lots from all fetched pages, with detailed information about each item and metadata about the scraping process.
 
-Example Response:
+Example Response with Scraping Summary:
 ```json
 {
   "success": true,
   "timestamp": "2024-02-14T12:34:56.789Z",
   "parameters": {
-    "query": "Antique Victorian mahogany dining table",
-    "priceResult": {
-      "min": "1750",
-      "max": "3250"
-    }
+    "query": "furniture",
+    "fetchAllPages": "true",
+    "maxPages": 1824
+  },
+  "pagination": {
+    "totalItems": 175072,
+    "totalPages": 1824,
+    "itemsPerPage": 96,
+    "currentPage": 1
+  },
+  "scrapingSummary": {
+    "pagesProcessed": 1824,
+    "skippedExistingPages": 951,
+    "totalPagesFound": 1824,
+    "automaticPagination": true
   },
   "data": {
     "lots": [...],
-    "totalResults": 42
+    "totalResults": 175072
   }
 }
 ```
@@ -180,6 +207,38 @@ docker run -p 8080:8080 \
 Deploy using Cloud Build:
 ```bash
 gcloud builds submit --config cloudbuild.yaml
+```
+
+## Automatic Pagination
+
+The latest version of the API includes automatic pagination, which eliminates the need to specify the `maxPages` parameter. The system will dynamically determine the total number of pages from the initial API response metadata and scrape all available pages.
+
+### How It Works
+
+1. When you make a request with `fetchAllPages=true` but without specifying `maxPages`, the system:
+   - Makes an initial API request to fetch just the first page
+   - Extracts the total number of items and the items per page from the metadata
+   - Calculates the total number of pages by dividing these values
+   - Uses this calculated value as the `maxPages` parameter
+
+2. The system then proceeds to fetch all pages, automatically skipping any that have already been processed and stored in Google Cloud Storage.
+
+3. The response includes detailed statistics in the `scrapingSummary` field.
+
+### Example Command
+
+This command will automatically determine the total number of pages for the "furniture" query and scrape all pages, skipping any that already exist in storage:
+
+```bash
+curl "https://valuer-dev-856401495068.us-central1.run.app/api/search?query=furniture&fetchAllPages=true&saveToGcs=true"
+```
+
+### Example Subcategory Command
+
+Similarly, you can use automatic pagination with furniture subcategories:
+
+```bash
+curl "https://valuer-dev-856401495068.us-central1.run.app/api/furniture/scrape/Chairs?fetchAllPages=true"
 ```
 
 ## Project Structure
