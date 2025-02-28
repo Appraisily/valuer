@@ -29,8 +29,8 @@ function constructSearchUrl(params = {}) {
   searchParams.append('query', params.query || 'furniture');
   searchParams.append('keyword', params.keyword || params.query || 'furniture');
   
-  // Manejar parámetros de paginación
-  if (params.page && !isNaN(params.page)) {
+  // Manejar parámetros de paginación - solo añadir si no es página 1 (default)
+  if (params.page && !isNaN(params.page) && params.page > 1) {
     searchParams.append('page', params.page);
   }
   
