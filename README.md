@@ -2,6 +2,10 @@
 
 A powerful API service that provides structured data from Invaluable auction listings with pagination support and configurable options.
 
+## Deployment
+
+The service is deployed at: https://valuer-dev-856401495068.us-central1.run.app
+
 ## Architecture Overview
 
 The application is built with Node.js and Express, and uses Puppeteer for browser automation. The core components are:
@@ -150,6 +154,24 @@ The application maintains backward compatibility with legacy endpoints:
 - `POST /api/scraper/start` - Start a scraping job
 
 ## Advanced Usage
+
+### API Commands
+
+```bash
+# Example command to fetch 5 pages of auction data
+curl -X POST https://valuer-dev-856401495068.us-central1.run.app/api/scraper/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "antique",
+    "supercategory": "Furniture",
+    "maxPages": 5,
+    "priceMin": 250,
+    "priceMax": 5000,
+    "saveToGcs": true,
+    "gcsBucket": "invaluable-data",
+    "headless": true
+  }'
+```
 
 ### Running Tests
 

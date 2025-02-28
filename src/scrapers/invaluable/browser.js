@@ -17,7 +17,22 @@ const browserConfig = {
     '--disable-notifications',
     '--disable-popup-blocking',
     '--disable-blink-features=AutomationControlled',
-    '--disable-browser-side-navigation'
+    '--disable-browser-side-navigation',
+    // Additional flags for cloud environment compatibility
+    '--disable-gpu',
+    '--no-first-run',
+    '--no-zygote',
+    '--single-process',
+    '--disable-extensions',
+    '--disable-accelerated-2d-canvas',
+    '--disable-accelerated-jpeg-decoding',
+    '--disable-accelerated-mjpeg-decode',
+    '--disable-accelerated-video-decode',
+    '--disable-background-networking',
+    '--disable-breakpad',
+    '--disable-component-extensions-with-background-pages',
+    '--disable-default-apps',
+    '--mute-audio'
   ],
   userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
   headers: {
@@ -53,188 +68,226 @@ class BrowserManager {
 
   async initialize() {
     if (!this.browser) {
-      console.log('Initializing browser...');
+      console.log('Initializing browser in cloud-compatible mode...');
       const width = 1920 + Math.floor(Math.random() * 100);
       const height = 1080 + Math.floor(Math.random() * 100);
 
-      this.browser = await puppeteer.launch({
-        headless: 'new',
-        args: [
-          ...browserConfig.args,
-          `--window-size=${width},${height}`,
-          '--enable-javascript',
-          '--enable-features=NetworkService,NetworkServiceInProcess',
-          '--disable-blink-features=AutomationControlled'
-        ],
-        ignoreHTTPSErrors: true,
-        defaultViewport: {
+      try {
+        this.browser = await puppeteer.launch({
+          headless: 'new',
+          args: [
+            ...browserConfig.args,
+            `--window-size=${width},${height}`,
+            '--enable-javascript',
+            '--enable-features=NetworkService,NetworkServiceInProcess',
+            '--disable-blink-features=AutomationControlled'
+          ],
+          ignoreHTTPSErrors: true,
+          defaultViewport: {
+            width,
+            height,
+            deviceScaleFactor: 1,
+            hasTouch: false,
+            isLandscape: true,
+            isMobile: false
+          },
+          // Increase timeout for cloud environments
+          timeout: 60000, // 60 seconds instead of default 30
+          // Properly handle pipe errors in containerized environments
+          handleSIGINT: false,
+          handleSIGTERM: false,
+          handleSIGHUP: false,
+          dumpio: true // Output browser console to Node process for debugging
+        });
+
+        console.log('Browser launched successfully');
+        
+        this.page = await this.browser.newPage();
+        
+        // Set viewport with device scale factor for better rendering
+        await this.page.setViewport({ 
           width,
           height,
           deviceScaleFactor: 1,
           hasTouch: false,
           isLandscape: true,
           isMobile: false
+        });
+
+        // Override navigator.webdriver
+        await this.page.evaluateOnNewDocument(() => {
+          Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+          });
+
+          // Enable JavaScript features
+          window.addEventListener = ((original) => {
+            return function(type, listener, options) {
+              if (type === 'load') {
+                setTimeout(() => {
+                  listener.call(this);
+                }, 500);
+                return;
+              }
+              return original.call(this, type, listener, options);
+            };
+          })(window.addEventListener);
+          
+          // Add modern browser features
+          window.chrome = {
+            runtime: {},
+            loadTimes: function() {},
+            csi: function() {},
+            app: {}
+          };
+          
+          // Add language preferences
+          Object.defineProperty(navigator, 'languages', {
+            get: () => ['en-US', 'en']
+          });
+          
+          // Add proper plugins
+          Object.defineProperty(navigator, 'plugins', {
+            get: () => [
+              {
+                0: { type: 'application/x-google-chrome-pdf' },
+                description: 'Portable Document Format',
+                filename: 'internal-pdf-viewer',
+                length: 1,
+                name: 'Chrome PDF Plugin'
+              },
+              {
+                0: { type: 'application/pdf' },
+                description: 'Portable Document Format',
+                filename: 'internal-pdf-viewer',
+                length: 1,
+                name: 'Chrome PDF Viewer'
+              },
+              {
+                0: { type: 'application/x-nacl' },
+                description: 'Native Client',
+                filename: 'internal-nacl-plugin',
+                length: 1,
+                name: 'Native Client'
+              }
+            ]
+          });
+          
+          // Add WebGL support
+          HTMLCanvasElement.prototype.getContext = ((original) => {
+            return function(type, attributes) {
+              if (type === 'webgl' || type === 'experimental-webgl') {
+                attributes = Object.assign({}, attributes, {
+                  preserveDrawingBuffer: true
+                });
+              }
+              return original.call(this, type, attributes);
+            };
+          })(HTMLCanvasElement.prototype.getContext);
+        });
+        
+        await this.page.setExtraHTTPHeaders(browserConfig.headers);
+        await this.page.setUserAgent(browserConfig.userAgent);
+        
+        // Store initial page
+        this.pages.set('main', this.page);
+
+        // Add additional browser features
+        await this.page.evaluateOnNewDocument(() => {
+          // Add WebRTC support
+          window.RTCPeerConnection = class RTCPeerConnection {
+            constructor() { }
+            createDataChannel() { return {}; }
+            createOffer() { return Promise.resolve({}); }
+            setLocalDescription() { return Promise.resolve(); }
+          };
+
+          // Add media devices
+          navigator.mediaDevices = {
+            enumerateDevices: async () => []
+          };
+
+          // Add battery API
+          navigator.getBattery = async () => ({
+            charging: true,
+            chargingTime: 0,
+            dischargingTime: Infinity,
+            level: 0.95
+          });
+        });
+        
+        // Add random mouse movements and scrolling
+        await this.addHumanBehavior(this.page);
+
+        // Add enhanced cloudflare evasion
+        await this.page.evaluateOnNewDocument(() => {
+          // Overwrite navigator properties to appear more human
+          Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+          Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+          
+          // Add fake timezone to match US
+          Object.defineProperty(Intl, 'DateTimeFormat', {
+            get: () => function(...args) {
+              return {
+                resolvedOptions: () => ({
+                  locale: 'en-US',
+                  timeZone: 'America/New_York'
+                })
+              };
+            }
+          });
+          
+          // Make fingerprinting more consistent
+          const originalGetParameter = WebGLRenderingContext.prototype.getParameter;
+          WebGLRenderingContext.prototype.getParameter = function(parameter) {
+            // UNMASKED_VENDOR_WEBGL
+            if (parameter === 37445) {
+              return 'Google Inc. (Intel)';
+            }
+            // UNMASKED_RENDERER_WEBGL
+            if (parameter === 37446) {
+              return 'ANGLE (Intel, Intel(R) UHD Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)';
+            }
+            return originalGetParameter.call(this, parameter);
+          };
+          
+          // Override permissions
+          const originalQuery = Permissions.prototype.query;
+          Permissions.prototype.query = function(parameters) {
+            return Promise.resolve({
+              state: 'granted',
+              onchange: null
+            });
+          };
+        });
+      } catch (error) {
+        console.error('Failed to launch browser:', error.message);
+        console.error('Error details:', error);
+        // Try one more time with minimal configuration
+        if (!this.browser) {
+          console.log('Retrying with minimal configuration...');
+          this.browser = await puppeteer.launch({
+            headless: 'new',
+            args: [
+              '--no-sandbox',
+              '--disable-setuid-sandbox',
+              '--disable-dev-shm-usage',
+              '--disable-gpu',
+              '--no-first-run',
+              '--no-zygote',
+              '--single-process'
+            ],
+            ignoreHTTPSErrors: true,
+            timeout: 60000,
+            dumpio: true
+          });
+          console.log('Browser launched with minimal configuration');
+          this.page = await this.browser.newPage();
         }
-      });
-
-      this.page = await this.browser.newPage();
-      
-      // Set viewport with device scale factor for better rendering
-      await this.page.setViewport({ 
-        width,
-        height,
-        deviceScaleFactor: 1,
-        hasTouch: false,
-        isLandscape: true,
-        isMobile: false
-      });
-
-      // Override navigator.webdriver
-      await this.page.evaluateOnNewDocument(() => {
-        Object.defineProperty(navigator, 'webdriver', {
-          get: () => undefined
-        });
-
-        // Enable JavaScript features
-        window.addEventListener = ((original) => {
-          return function(type, listener, options) {
-            if (type === 'load') {
-              setTimeout(() => {
-                listener.call(this);
-              }, 500);
-              return;
-            }
-            return original.call(this, type, listener, options);
-          };
-        })(window.addEventListener);
-        
-        // Add modern browser features
-        window.chrome = {
-          runtime: {},
-          loadTimes: function() {},
-          csi: function() {},
-          app: {}
-        };
-        
-        // Add language preferences
-        Object.defineProperty(navigator, 'languages', {
-          get: () => ['en-US', 'en']
-        });
-        
-        // Add proper plugins
-        Object.defineProperty(navigator, 'plugins', {
-          get: () => [
-            {
-              0: { type: 'application/x-google-chrome-pdf' },
-              description: 'Portable Document Format',
-              filename: 'internal-pdf-viewer',
-              length: 1,
-              name: 'Chrome PDF Plugin'
-            },
-            {
-              0: { type: 'application/pdf' },
-              description: 'Portable Document Format',
-              filename: 'internal-pdf-viewer',
-              length: 1,
-              name: 'Chrome PDF Viewer'
-            },
-            {
-              0: { type: 'application/x-nacl' },
-              description: 'Native Client',
-              filename: 'internal-nacl-plugin',
-              length: 1,
-              name: 'Native Client'
-            }
-          ]
-        });
-        
-        // Add WebGL support
-        HTMLCanvasElement.prototype.getContext = ((original) => {
-          return function(type, attributes) {
-            if (type === 'webgl' || type === 'experimental-webgl') {
-              attributes = Object.assign({}, attributes, {
-                preserveDrawingBuffer: true
-              });
-            }
-            return original.call(this, type, attributes);
-          };
-        })(HTMLCanvasElement.prototype.getContext);
-      });
-      
-      await this.page.setExtraHTTPHeaders(browserConfig.headers);
-      await this.page.setUserAgent(browserConfig.userAgent);
+      }
       
       // Store initial page
       this.pages.set('main', this.page);
-
-      // Add additional browser features
-      await this.page.evaluateOnNewDocument(() => {
-        // Add WebRTC support
-        window.RTCPeerConnection = class RTCPeerConnection {
-          constructor() { }
-          createDataChannel() { return {}; }
-          createOffer() { return Promise.resolve({}); }
-          setLocalDescription() { return Promise.resolve(); }
-        };
-
-        // Add media devices
-        navigator.mediaDevices = {
-          enumerateDevices: async () => []
-        };
-
-        // Add battery API
-        navigator.getBattery = async () => ({
-          charging: true,
-          chargingTime: 0,
-          dischargingTime: Infinity,
-          level: 0.95
-        });
-      });
-      
-      // Add random mouse movements and scrolling
-      await this.addHumanBehavior(this.page);
-
-      // Add enhanced cloudflare evasion
-      await this.page.evaluateOnNewDocument(() => {
-        // Overwrite navigator properties to appear more human
-        Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-        
-        // Add fake timezone to match US
-        Object.defineProperty(Intl, 'DateTimeFormat', {
-          get: () => function(...args) {
-            return {
-              resolvedOptions: () => ({
-                locale: 'en-US',
-                timeZone: 'America/New_York'
-              })
-            };
-          }
-        });
-        
-        // Make fingerprinting more consistent
-        const originalGetParameter = WebGLRenderingContext.prototype.getParameter;
-        WebGLRenderingContext.prototype.getParameter = function(parameter) {
-          // UNMASKED_VENDOR_WEBGL
-          if (parameter === 37445) {
-            return 'Google Inc. (Intel)';
-          }
-          // UNMASKED_RENDERER_WEBGL
-          if (parameter === 37446) {
-            return 'ANGLE (Intel, Intel(R) UHD Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)';
-          }
-          return originalGetParameter.call(this, parameter);
-        };
-        
-        // Override permissions
-        const originalQuery = Permissions.prototype.query;
-        Permissions.prototype.query = function(parameters) {
-          return Promise.resolve({
-            state: 'granted',
-            onchange: null
-          });
-        };
-      });
     }
   }
 

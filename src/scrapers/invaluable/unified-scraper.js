@@ -63,26 +63,59 @@ class UnifiedScraper {
   }
   
   /**
-   * Initialize the browser instance with request interception
+   * Initialize the browser
    */
   async initialize() {
-    if (this.initialized) return;
-    
-    try {
-      this.debug('Initializing browser...');
-      
-      this.browser = new BrowserManager({
-        headless: this.config.headless,
-        userDataDir: this.config.userDataDir
-      });
-      
-      await this.browser.initialize();
-      this.initialized = true;
-      this.debug('Browser initialized successfully');
-    } catch (error) {
-      console.error('[UnifiedScraper] Error initializing browser:', error);
-      throw error;
+    if (this.initialized) {
+      this.debug('Browser already initialized');
+      return;
     }
+    
+    let retries = 0;
+    const maxRetries = 3;
+    let lastError = null;
+    
+    while (retries < maxRetries) {
+      try {
+        this.debug(`Initializing browser${retries > 0 ? ` (attempt ${retries + 1}/${maxRetries})` : ''}...`);
+        
+        this.browser = new BrowserManager({
+          headless: this.config.headless,
+          userDataDir: this.config.userDataDir
+        });
+        
+        await this.browser.initialize();
+        this.initialized = true;
+        this.debug('Browser initialized successfully');
+        return;
+      } catch (error) {
+        lastError = error;
+        console.error(`[UnifiedScraper] Error initializing browser (attempt ${retries + 1}/${maxRetries}):`, error.message);
+        
+        // Close browser if it was partially created
+        if (this.browser) {
+          try {
+            await this.browser.close();
+          } catch (closeError) {
+            console.error('[UnifiedScraper] Error closing browser after failed initialization:', closeError.message);
+          }
+          this.browser = null;
+        }
+        
+        retries++;
+        
+        if (retries < maxRetries) {
+          // Wait before retrying (exponential backoff)
+          const delayMs = Math.min(2000 * Math.pow(2, retries), 10000);
+          console.log(`[UnifiedScraper] Retrying in ${delayMs/1000} seconds...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+    
+    // All retries failed
+    console.error('[UnifiedScraper] All browser initialization attempts failed');
+    throw lastError || new Error('Failed to initialize browser after multiple attempts');
   }
   
   /**
