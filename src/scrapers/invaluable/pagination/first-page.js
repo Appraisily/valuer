@@ -7,18 +7,20 @@ const { DEFAULT_TIMEOUT } = require('../constants');
 
 /**
  * Handles the first page of search results
- * @param {Object} browser - Puppeteer browser instance
+ * @param {Object} browser - Browser manager instance
  * @param {Object} params - Search parameters
  * @param {Array} cookies - Browser cookies
- * @returns {Promise<Object>} Search results for the first page
+ * @returns {Promise<Object>} Object containing search results and cookies
  */
 const handleFirstPage = async (browser, params, cookies = []) => {
   const startTime = Date.now();
   console.log(`[${getTimestamp()}] 🔍 handleFirstPage: Processing first page of results`);
   
   try {
-    // Create a new page
-    const page = await browser.newPage();
+    // Create a new page - check if browser is a BrowserManager or a plain puppeteer Browser
+    const page = browser.createTab ? 
+      await browser.createTab('firstPage') : 
+      await browser.newPage();
     
     // Set cookies if provided
     if (cookies && cookies.length > 0) {
@@ -62,8 +64,15 @@ const handleFirstPage = async (browser, params, cookies = []) => {
     // Wait a bit to ensure all responses are processed
     await wait(page, 1000);
     
-    // Close the page
-    await page.close();
+    // Get all cookies from the page
+    const pageCookies = await page.cookies();
+    
+    // Close the page - use the appropriate method depending on browser type
+    if (browser.closeTab) {
+      await browser.closeTab('firstPage');
+    } else {
+      await page.close();
+    }
     
     if (!searchResults) {
       console.error(`[${getTimestamp()}] ❌ No search results obtained from first page`);
@@ -73,7 +82,11 @@ const handleFirstPage = async (browser, params, cookies = []) => {
     const elapsed = Date.now() - startTime;
     console.log(`[${getTimestamp()}] ✅ First page processed successfully in ${formatElapsedTime(startTime)} (${elapsed}ms)`);
     
-    return searchResults;
+    // Return both results and cookies in the expected format
+    return {
+      results: searchResults,
+      initialCookies: pageCookies
+    };
   } catch (error) {
     const elapsed = Date.now() - startTime;
     console.error(`[${getTimestamp()}] ❌ Error in handleFirstPage after ${formatElapsedTime(startTime)}: ${error.message}`);

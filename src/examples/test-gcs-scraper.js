@@ -35,6 +35,39 @@ const CONFIG = {
   checkpointDir: path.join(__dirname, '../../temp/checkpoints'),
 };
 
+// Parse command line arguments
+const parseArgs = () => {
+  const args = {};
+  process.argv.slice(2).forEach(arg => {
+    if (arg.startsWith('--')) {
+      const [key, value] = arg.slice(2).split('=');
+      if (value && value.startsWith('"') && value.endsWith('"')) {
+        // Remove quotes if present
+        args[key] = value.slice(1, -1);
+      } else {
+        args[key] = value || true;
+      }
+    }
+  });
+  return args;
+};
+
+const args = parseArgs();
+console.log('Command line arguments:', args);
+
+if (args.query) {
+  CONFIG.query = args.query;
+  console.log(`Using query: "${CONFIG.query}"`);
+}
+if (args.supercategory) {
+  CONFIG.supercategoryName = args.supercategory;
+  console.log(`Using supercategory: "${CONFIG.supercategoryName}"`);
+}
+if (args.maxPages) {
+  CONFIG.maxPages = parseInt(args.maxPages, 10) || CONFIG.maxPages;
+  console.log(`Using maxPages: ${CONFIG.maxPages}`);
+}
+
 /**
  * Run test scraper function
  */
@@ -56,9 +89,15 @@ async function testGcsScraper() {
     
     // Build search parameters
     const searchParams = buildSearchParams({ 
+      query: CONFIG.query || "",
+      supercategoryName: CONFIG.supercategoryName || "",
+      categoryName: CONFIG.categoryName || "",
+      subcategoryName: CONFIG.subcategoryName || "",
       category: CONFIG.category,
       sortBy: 'item_title_asc',
     });
+    
+    console.log(`Search params: ${JSON.stringify(searchParams)}`);
     
     // Get first page
     console.log('Fetching first page...');

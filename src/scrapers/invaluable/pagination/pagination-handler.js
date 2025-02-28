@@ -7,7 +7,7 @@ const { constructSearchUrl } = require('../url-builder');
 
 /**
  * Handles pagination for the Invaluable search results.
- * @param {Browser} browser - Puppeteer browser instance
+ * @param {Object} browser - Browser manager or Puppeteer browser instance
  * @param {Object} params - Search parameters
  * @param {Object} firstPageResults - Results from the first page
  * @param {Array} cookies - Browser cookies
@@ -51,7 +51,12 @@ const handlePagination = async (browser, params, firstPageResults, cookies = [],
     
     // Get browser state for API calls
     console.log(`[${getTimestamp()}] 🌐 Getting a new page for pagination API calls`);
-    const page = await browser.newPage();
+    
+    // Check if browser is a BrowserManager or a plain puppeteer Browser
+    const page = browser.createTab ? 
+      await browser.createTab('pagination') : 
+      await browser.newPage();
+      
     if (cookies && cookies.length > 0) {
       console.log(`[${getTimestamp()}] 🍪 Setting ${cookies.length} cookies`);
       await page.setCookie(...cookies);
@@ -142,8 +147,12 @@ const handlePagination = async (browser, params, firstPageResults, cookies = [],
       }
     }
     
-    // Close the page when done
-    await page.close();
+    // Close the page
+    if (browser.closeTab) {
+      await browser.closeTab('pagination');
+    } else {
+      await page.close();
+    }
     
     // Update the combined results with all hits
     combinedResults.results[0].hits = allHits;

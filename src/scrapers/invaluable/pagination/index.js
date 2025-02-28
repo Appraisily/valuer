@@ -9,6 +9,7 @@ const { wait, getTimestamp, formatElapsedTime } = require('./utilities');
 const { requestSessionInfo } = require('./session-manager');
 const { requestPageResults } = require('./page-manager');
 const { handlePagination } = require('./pagination-handler');
+const { handleFirstPage } = require('./first-page');
 
 // Import constants
 const {
@@ -23,6 +24,7 @@ const {
 module.exports = {
   // Core pagination function
   handlePagination,
+  handleFirstPage,
   
   // Utility functions
   wait,
