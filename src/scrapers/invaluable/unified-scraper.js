@@ -210,7 +210,7 @@ class UnifiedScraper {
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
     
     // Give a bit more time for any delayed Ajax requests
-    await page.waitForTimeout(2000);
+    await new Promise(resolve => setTimeout(resolve, 2000));
     
     // Extract cookies from the page
     const cookies = await page.cookies();
@@ -229,8 +229,8 @@ class UnifiedScraper {
         window.scrollBy(0, 500);
       });
       
-      // Wait a bit more
-      await page.waitForTimeout(3000);
+      // Wait a bit more using setTimeout instead of waitForTimeout
+      await new Promise(resolve => setTimeout(resolve, 3000));
       
       // Check again for catResults responses
       const updatedCatResultsUrls = Object.keys(this.interceptedResponses);
