@@ -1,25 +1,19 @@
-# Valuer - Invaluable Search API & Enhanced Scraper
+# Invaluable Search API
 
-A specialized Node.js tool for accessing and extracting data from Invaluable's auction listings. The project consists of two main components:
-
-1. **API Service**: A RESTful API that intercepts and returns raw JSON responses from Invaluable's search endpoints
-2. **Enhanced Scraper**: A robust scraper with pagination support and Google Cloud Storage integration
+A specialized Node.js API that provides access to Invaluable's search results by intercepting and returning the raw JSON responses from their catResults endpoint. Built with Puppeteer and Express, this API handles all the complexities of browser automation, cookie management, and request interception.
 
 ## Overview
 
-This project provides powerful tools for searching and collecting data from Invaluable's catalog by:
-- Automating browser interactions with Puppeteer
-- Managing required cookies, headers and authentication
+This API provides a simple interface to search Invaluable's catalog by:
+- Automating browser interactions
+- Managing required cookies and headers
 - Intercepting and capturing JSON responses
 - Handling protection challenges
-- Supporting comprehensive search parameters
-- Enabling large-scale data collection with resumable operations
+- Supporting all Invaluable search parameters
 
 ## Features
 
-### API Service
-
-#### Core Functionality
+### Core Functionality
 - **Dynamic Parameter Support**
   - Accepts all Invaluable search parameters
   - Constructs proper search URLs
@@ -40,36 +34,29 @@ This project provides powerful tools for searching and collecting data from Inva
   - Size-based filtering
   - Detailed logging of result counts
 
-#### Technical Features
-- **Browser Management**
-  - Multi-tab processing
-  - Resource blocking
-  - Request interception
-  - Human behavior simulation:
-    - Random mouse movements
-    - Natural scrolling patterns
-    - Realistic timing delays
-    - Dynamic viewport handling
+### Technical Features
 
-- **API Features**
-  - RESTful endpoint at `/api/search`
-  - Dynamic parameter support
-  - Real-time response capture
-  - Comprehensive error handling
-  - Detailed response logging
+#### Browser Management
+- Multi-tab processing
+- Resource blocking
+- Request interception
+- Human behavior simulation:
+  - Random mouse movements
+  - Natural scrolling patterns
+  - Realistic timing delays
+  - Dynamic viewport handling
 
-### Enhanced Scraper
-
-- **Resumable Pagination**: Can stop and resume scraping at any point
-- **Progress Tracking**: Detailed statistics and checkpoints
-- **Adaptive Rate Limiting**: Smart delays to avoid detection
-- **Fault Tolerance**: Auto-retry with exponential backoff
-- **Google Cloud Storage Integration**: Store results directly to GCS
+#### API Features
+- RESTful endpoint at `/api/search`
+- Dynamic parameter support
+- Real-time response capture
+- Comprehensive error handling
+- Detailed response logging
 
 ## Prerequisites
 
-- Node.js (v14 or higher, v18+ recommended)
-- Google Cloud SDK (for GCS integration and deployment)
+- Node.js (v18 or higher)
+- Google Cloud SDK (for deployment)
 - Docker (for containerization)
 
 ## Environment Variables
@@ -84,8 +71,8 @@ STORAGE_BUCKET=invaluable-html-archive
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/valuer.git
-cd valuer
+git clone <repository-url>
+cd invaluable-search-api
 ```
 
 2. Install dependencies:
@@ -93,13 +80,7 @@ cd valuer
 npm install
 ```
 
-3. Create a `.env` file based on the example:
-```bash
-cp .env.example .env
-# Edit .env with your configuration
-```
-
-4. Start the API server:
+3. Start the server:
 ```bash
 npm start
 ```
@@ -112,18 +93,18 @@ npm start
 GET /api/search
 ```
 
-#### Query Parameters
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `query` | Main search query | "Antique Victorian mahogany" |
-| `keyword` | Additional keyword filter | "dining table" |
-| `supercategoryName` | Category name | "Furniture", "Fine Art" |
-| `priceResult[min]` | Minimum price | 1750 |
-| `priceResult[max]` | Maximum price | 3250 |
-| `houseName` | Auction house name | "DOYLE Auctioneers" |
-| `upcoming` | Filter for upcoming auctions | true/false |
+Query Parameters:
+- `query`: Search query (e.g., "Antique Victorian mahogany dining table")
+- `keyword`: Additional keyword filter
+- `supercategoryName`: Category name (e.g., "Furniture", "Fine Art")
+- `priceResult[min]`: Minimum price
+- `priceResult[max]`: Maximum price
+- `houseName`: Auction house name
+- `upcoming`: Filter for upcoming auctions (true/false)
+- `fetchAllPages`: Set to `true` to automatically fetch all pages of results
+- `maxPages`: Maximum number of pages to fetch when using `fetchAllPages` (default: 10)
 
-#### Example Requests
+Example Requests:
 ```bash
 # Basic search
 curl "http://localhost:8080/api/search?query=furniture"
@@ -136,9 +117,30 @@ curl "http://localhost:8080/api/search?query=Antique+Victorian+mahogany+dining+t
 
 # Search specific auction house
 curl "http://localhost:8080/api/search?houseName=DOYLE%20Auctioneers%20%26%20Appraisers&query=antique"
+
+# Search with pagination to get multiple pages
+curl "https://valuer-dev-856401495068.us-central1.run.app/api/search?query=furniture&fetchAllPages=true&maxPages=3"
 ```
 
-#### Example Response
+### Pagination and Data Interception Process
+
+When using the endpoint with pagination parameters (like `https://valuer-dev-856401495068.us-central1.run.app/api/search?query=furniture&fetchAllPages=true&maxPages=3`), the API works as follows:
+
+1. **Request Interception**: The system uses Puppeteer to create an automated browser session to Invaluable's website.
+
+2. **catResults Capture**: The API intercepts the JSON responses from Invaluable's internal `/catResults` endpoint, which contains the raw auction data.
+
+3. **Pagination Handling**: When `fetchAllPages=true` is specified:
+   - The API first captures the initial page of results
+   - It then automatically navigates through subsequent pages (up to the `maxPages` limit)
+   - For each page, it intercepts the `/catResults` response
+   - All pages are combined into a single comprehensive response
+
+4. **Data Processing**: The raw JSON data from the catResults endpoint is processed and standardized to provide a consistent response format.
+
+5. **Response Format**: The final response includes all auction lots from all fetched pages, with detailed information about each item.
+
+Example Response:
 ```json
 {
   "success": true,
@@ -157,11 +159,82 @@ curl "http://localhost:8080/api/search?houseName=DOYLE%20Auctioneers%20%26%20App
 }
 ```
 
-## Enhanced Scraper Usage
+## Deployment
 
-The enhanced scraper provides tools for large-scale data collection with resilient pagination handling.
+### Docker
 
-### Storage Structure
+Build the image:
+```bash
+docker build -t invaluable-search-api .
+```
+
+Run locally:
+```bash
+docker run -p 8080:8080 \
+  -e GOOGLE_CLOUD_PROJECT=your-project-id \
+  invaluable-search-api
+```
+
+### Google Cloud Run
+
+Deploy using Cloud Build:
+```bash
+gcloud builds submit --config cloudbuild.yaml
+```
+
+## Project Structure
+
+```
+├── src/
+│   ├── server.js                 # Express server setup
+│   ├── scrapers/
+│   │   └── invaluable/
+│   │       ├── index.js         # Main scraper class
+│   │       ├── browser.js       # Browser management
+│   │       ├── auth.js          # Authentication handling
+│   │       └── utils.js         # Utility functions
+│   └── routes/
+│       └── search.js            # Search endpoint
+├── Dockerfile                    # Container configuration
+├── cloudbuild.yaml              # Cloud Build config
+└── package.json                 # Dependencies
+```
+
+## Error Handling
+
+The system handles various error scenarios:
+- Network timeouts
+- Protection challenges
+- API failures
+- Invalid responses
+- Rate limiting
+- Browser errors
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+MIT License
+
+# Enhanced Invaluable Scraper
+
+An improved scraper for Invaluable with features for reliable large-scale data collection.
+
+## Features
+
+- **Resumable Pagination**: Can stop and resume scraping at any point
+- **Progress Tracking**: Detailed statistics and checkpoints
+- **Adaptive Rate Limiting**: Smart delays to avoid detection
+- **Fault Tolerance**: Auto-retry with exponential backoff
+- **Google Cloud Storage Integration**: Store results directly to GCS
+
+## Storage Structure
 
 ```
 gs://invaluable-data/
@@ -173,7 +246,40 @@ gs://invaluable-data/
           └── ...
 ```
 
-### Configuration
+## Installation
+
+1. Clone the repository
+2. Install dependencies:
+
+```bash
+npm install
+```
+
+3. Set up Google Cloud credentials:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/service-account-file.json"
+```
+
+### Using Existing Service Account Credentials
+
+If you're already using a Google Cloud service account in your application, you can use the same credentials for the scraper:
+
+1. **Using Application Default Credentials**: If your application is already authenticated (running on GCP or using ADC), the scraper will automatically use these credentials.
+
+2. **Using an Existing Service Account**: Modify the configuration to include your credentials:
+
+```javascript
+// In your configuration:
+const CONFIG = {
+  // ...other settings
+  gcsEnabled: true,
+  gcsBucket: 'your-bucket-name',
+  gcsCredentials: require('./path/to/service-account.json') // Or pass credentials object directly
+};
+```
+
+## Configuration
 
 Edit `src/examples/invaluable-category-scraper.js` to customize:
 
@@ -183,7 +289,7 @@ Edit `src/examples/invaluable-category-scraper.js` to customize:
 - Rate limiting parameters
 - Google Cloud Storage settings
 
-### Running the Scraper
+## Usage
 
 Run the example scraper:
 
@@ -191,7 +297,7 @@ Run the example scraper:
 npm start
 ```
 
-Or programmatically:
+Or use the pagination manager in your own code:
 
 ```javascript
 const PaginationManager = require('./src/scrapers/invaluable/pagination/pagination-manager');
@@ -214,95 +320,13 @@ const results = await paginationManager.processPagination(
 );
 ```
 
-## Deployment
+## Key Components
 
-### Docker
-
-Build the image:
-```bash
-docker build -t valuer .
-```
-
-Run locally:
-```bash
-docker run -p 8080:8080 \
-  -e GOOGLE_CLOUD_PROJECT=your-project-id \
-  valuer
-```
-
-### Google Cloud Run
-
-Deploy using Cloud Build:
-```bash
-gcloud builds submit --config cloudbuild.yaml
-```
-
-## Project Structure
-
-```
-├── src/
-│   ├── server.js                     # Express server setup
-│   ├── examples/
-│   │   └── invaluable-category-scraper.js  # Example scraper
-│   ├── scrapers/
-│   │   └── invaluable/
-│   │       ├── index.js              # Main scraper class
-│   │       ├── browser.js            # Browser management
-│   │       ├── auth.js               # Authentication handling
-│   │       └── pagination/           # Pagination handling
-│   │           └── pagination-manager.js  # Pagination manager
-│   ├── routes/
-│   │   └── search.js                 # Search endpoint
-│   └── utils/                        # Utility functions
-├── Dockerfile                         # Container configuration
-├── cloudbuild.yaml                    # Cloud Build config
-└── package.json                       # Dependencies
-```
-
-## Error Handling
-
-The system handles various error scenarios:
-- Network timeouts
-- Protection challenges
-- API failures
-- Invalid responses
-- Rate limiting
-- Browser errors
+- **PaginationManager**: Handles resumable pagination, checkpoints, and rate limiting
+- **StorageManager**: Manages saving data to Google Cloud Storage
 
 ## Troubleshooting
 
 - **Rate limiting issues**: Try increasing the `baseDelay` and `maxDelay` parameters
 - **Connection errors**: The scraper has built-in retry logic, but persistent issues may require proxy rotation
 - **GCS permissions**: Ensure your service account has proper permissions for the bucket
-
-## Google Cloud Storage Integration
-
-### Using Existing Service Account Credentials
-
-If you're already using a Google Cloud service account in your application, you can use the same credentials for the scraper:
-
-1. **Using Application Default Credentials**: If your application is already authenticated (running on GCP or using ADC), the scraper will automatically use these credentials.
-
-2. **Using an Existing Service Account**: Modify the configuration to include your credentials:
-
-```javascript
-// In your configuration:
-const CONFIG = {
-  // ...other settings
-  gcsEnabled: true,
-  gcsBucket: 'your-bucket-name',
-  gcsCredentials: require('./path/to/service-account.json') // Or pass credentials object directly
-};
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## License
-
-MIT License

@@ -5,25 +5,10 @@
  * with resumable pagination, progress tracking, rate limiting, and GCS storage.
  */
 const path = require('path');
-const fs = require('fs');
 const BrowserManager = require('../scrapers/invaluable/browser');
 const { buildSearchParams } = require('../scrapers/invaluable/utils');
 const { handleFirstPage } = require('../scrapers/invaluable/pagination');
 const PaginationManager = require('../scrapers/invaluable/pagination/pagination-manager');
-
-// Ensure temp directory exists
-const tempDir = path.join(__dirname, '../../temp/chrome-data');
-try {
-  if (!fs.existsSync(path.join(__dirname, '../../temp'))) {
-    fs.mkdirSync(path.join(__dirname, '../../temp'));
-  }
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir);
-  }
-} catch (err) {
-  console.warn('Warning: Could not create temp directory:', err.message);
-  // Continue anyway, as we can run headless without a user data dir
-}
 
 // Configuration
 const CONFIG = {
@@ -33,19 +18,19 @@ const CONFIG = {
   startPage: 1,               // Page to start from (useful for resuming)
   
   // Browser settings
-  userDataDir: tempDir,
-  headless: true,             // Running headless in production
+  userDataDir: path.join(__dirname, '../../temp/chrome-data'),
+  headless: false,            // Set to true for production
   
   // Storage settings
   gcsEnabled: true,           // Enable Google Cloud Storage
-  gcsBucket: process.env.STORAGE_BUCKET || 'invaluable-data',
+  gcsBucket: 'invaluable-data',
   batchSize: 100,             // Number of pages per batch file
   // If using explicit credentials file or object (optional)
   // gcsCredentials: require('../path/to/credentials.json'), 
   
   // Rate limiting settings
-  baseDelay: 1500,            // Base delay between requests
-  maxDelay: 4000,             // Maximum delay
+  baseDelay: 2000,            // Base delay between requests in ms
+  maxDelay: 30000,            // Maximum delay in ms
   minDelay: 1000,             // Minimum delay in ms
   maxRetries: 3,              // Maximum retries per page
   
@@ -57,31 +42,28 @@ const CONFIG = {
 /**
  * Main scraper function
  */
-async function scrapeCategory(config = CONFIG) {
-  // Use the passed config or default to CONFIG
-  const mergedConfig = { ...CONFIG, ...config };
-  
-  console.log(`Starting Invaluable category scraper for: ${mergedConfig.category}`);
-  console.log(`Will scrape up to ${mergedConfig.maxPages} pages with batch size of ${mergedConfig.batchSize}`);
+async function scrapeCategory() {
+  console.log(`Starting Invaluable category scraper for: ${CONFIG.category}`);
+  console.log(`Will scrape up to ${CONFIG.maxPages} pages with batch size of ${CONFIG.batchSize}`);
   
   // Initialize browser
   const browser = new BrowserManager({
-    userDataDir: mergedConfig.userDataDir,
-    headless: mergedConfig.headless,
+    userDataDir: CONFIG.userDataDir,
+    headless: CONFIG.headless,
   });
   
   try {
-    await browser.initialize();
+    await browser.init();
     console.log('Browser initialized');
     
     // Build search parameters for the category
     const searchParams = buildSearchParams({ 
-      category: mergedConfig.category,
+      category: CONFIG.category,
       sortBy: 'item_title_asc',  // Consistent ordering helps with pagination
     });
     
     // Get the first page of results
-    console.log(`Getting first page of results for ${mergedConfig.category}...`);
+    console.log(`Getting first page of results for ${CONFIG.category}...`);
     const { results: firstPageResults, initialCookies } = await handleFirstPage(browser, searchParams);
     
     if (!firstPageResults || !firstPageResults.results || !firstPageResults.results[0]?.hits) {
@@ -89,24 +71,24 @@ async function scrapeCategory(config = CONFIG) {
     }
     
     const totalHits = firstPageResults.results[0].meta?.totalHits || 0;
-    console.log(`Found ${totalHits} total items in ${mergedConfig.category}`);
+    console.log(`Found ${totalHits} total items in ${CONFIG.category}`);
     
     // Initialize the pagination manager
     const paginationManager = new PaginationManager({
-      category: mergedConfig.category,
-      query: searchParams.keyword || mergedConfig.category,
-      maxPages: mergedConfig.maxPages,
-      startPage: mergedConfig.startPage,
-      checkpointInterval: mergedConfig.checkpointInterval,
-      checkpointDir: mergedConfig.checkpointDir,
-      gcsEnabled: mergedConfig.gcsEnabled,
-      gcsBucket: mergedConfig.gcsBucket,
-      gcsCredentials: mergedConfig.gcsCredentials,
-      batchSize: mergedConfig.batchSize,
-      baseDelay: mergedConfig.baseDelay,
-      maxDelay: mergedConfig.maxDelay,
-      minDelay: mergedConfig.minDelay,
-      maxRetries: mergedConfig.maxRetries,
+      category: CONFIG.category,
+      query: searchParams.keyword || CONFIG.category,
+      maxPages: CONFIG.maxPages,
+      startPage: CONFIG.startPage,
+      checkpointInterval: CONFIG.checkpointInterval,
+      checkpointDir: CONFIG.checkpointDir,
+      gcsEnabled: CONFIG.gcsEnabled,
+      gcsBucket: CONFIG.gcsBucket,
+      gcsCredentials: CONFIG.gcsCredentials,
+      batchSize: CONFIG.batchSize,
+      baseDelay: CONFIG.baseDelay,
+      maxDelay: CONFIG.maxDelay,
+      minDelay: CONFIG.minDelay,
+      maxRetries: CONFIG.maxRetries,
     });
     
     // Process pagination
@@ -121,17 +103,17 @@ async function scrapeCategory(config = CONFIG) {
     // Print summary statistics
     const stats = paginationManager.getStats();
     console.log('\n===== SCRAPING COMPLETE =====');
-    console.log(`Category: ${mergedConfig.category}`);
+    console.log(`Category: ${CONFIG.category}`);
     console.log(`Total items collected: ${stats.totalItems}`);
-    console.log(`Pages processed: ${stats.completedPages} of ${Math.min(Math.ceil(totalHits / 96), mergedConfig.maxPages)}`);
+    console.log(`Pages processed: ${stats.completedPages} of ${Math.min(Math.ceil(totalHits / 96), CONFIG.maxPages)}`);
     console.log(`Failed pages: ${stats.failedPages}`);
     console.log(`Success rate: ${stats.successRate}`);
     console.log(`Total time: ${stats.runningTimeMin.toFixed(2)} minutes`);
     console.log(`Items per minute: ${stats.itemsPerMinute}`);
     
-    if (mergedConfig.gcsEnabled) {
+    if (CONFIG.gcsEnabled) {
       console.log(`Batches saved to GCS: ${stats.batchesSaved}`);
-      console.log(`GCS Bucket: gs://${mergedConfig.gcsBucket}/raw/${mergedConfig.category}/`);
+      console.log(`GCS Bucket: gs://${CONFIG.gcsBucket}/raw/${CONFIG.category}/`);
     }
     
     return stats;

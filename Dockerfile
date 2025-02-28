@@ -15,18 +15,20 @@ RUN apt-get update && apt-get install -y \
 # Create app directory
 WORKDIR /usr/src/app
 
-# Create temp directory for Chrome user data
-RUN mkdir -p temp/chrome-data && chmod -R 777 temp
+# Skip Puppeteer download since we're using the installed Chrome
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
-# Install app dependencies
+# Install app dependencies with npm cache clean
 COPY package*.json ./
-RUN npm install
+RUN npm cache clean --force && \
+    npm install --no-optional --verbose
 
 # Bundle app source
 COPY . .
 
 # Expose port
-EXPOSE 8080
+EXPOSE 3000
 
 # Start the application
 CMD [ "npm", "start" ]
