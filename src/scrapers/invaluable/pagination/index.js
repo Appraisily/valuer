@@ -291,6 +291,15 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
             console.log(`Finalizando paginación tempranamente: alcanzado límite máximo configurado`);
             break;
           }
+          
+          // Añadir un retraso deliberado entre páginas (2-3 segundos)
+          try {
+            const pagePauseTime = 2000 + Math.floor(Math.random() * 1000); // 2-3 segundos
+            console.log(`⏱️ Esperando ${pagePauseTime}ms antes de procesar la siguiente página...`);
+            await wait(page, pagePauseTime);
+          } catch (waitError) {
+            console.warn(`⚠️ Error en la pausa entre páginas: ${waitError.message}`);
+          }
         } else {
           console.error(`❌ Error al procesar la página ${pageNum}: formato de respuesta inválido`);
           failedPages.add(pageNum);
