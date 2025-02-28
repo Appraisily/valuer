@@ -4,7 +4,9 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { handlePagination, requestPageResults } = require('./index');
+// Import directly from source files instead of index to avoid circular dependencies
+const { handlePagination } = require('./pagination-handler');
+const { requestPageResults } = require('./page-manager');
 const { extractNavigationParams } = require('./navigation-params');
 const { buildResultsPayload } = require('./request-interceptor');
 const StorageManager = require('../../../utils/storage-manager');

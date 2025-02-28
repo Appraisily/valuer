@@ -32,7 +32,31 @@ const browserConfig = {
     '--disable-breakpad',
     '--disable-component-extensions-with-background-pages',
     '--disable-default-apps',
-    '--mute-audio'
+    '--mute-audio',
+    // Resource management flags - add these to optimize for cloud environment
+    '--disable-3d-apis',
+    '--disable-accelerated-mjpeg-decode',
+    '--disable-accelerated-2d-canvas',
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-backing-store-limit',
+    '--disable-canvas-aa',
+    '--disable-bundled-ppapi-flash',
+    '--memory-pressure-off',
+    '--js-flags=--max-old-space-size=2048',
+    '--disable-sync',
+    '--deterministic-mode',
+    '--use-gl=swiftshader',
+    // Temporary directories for cloud environment
+    '--disk-cache-dir=/tmp/cache-dir',
+    '--user-data-dir=/tmp/user-data',
+    '--homedir=/tmp',
+    // Disable crash reporting and other services
+    '--disable-crash-reporter',
+    '--disable-gesture-typing',
+    '--disable-hang-monitor',
+    '--disable-prompt-on-repost',
+    '--disable-domain-reliability'
   ],
   userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
   headers: {
@@ -73,6 +97,24 @@ class BrowserManager {
       const height = 1080 + Math.floor(Math.random() * 100);
 
       try {
+        // Log environment information for debugging
+        console.log('Chrome Debug: Node version', process.version);
+        console.log('Chrome Debug: CHROME_EXECUTABLE_PATH', process.env.PUPPETEER_EXECUTABLE_PATH || 'not set');
+        console.log('Chrome Debug: Available environment variables:', Object.keys(process.env).filter(key => key.includes('CHROME') || key.includes('PUPPETEER')));
+        console.log('Chrome Debug: Launching browser with args:', browserConfig.args);
+
+        // Try to check if Chrome is available and executable
+        try {
+          const { execSync } = require('child_process');
+          const chromeVersion = execSync(process.env.PUPPETEER_EXECUTABLE_PATH ? 
+            `${process.env.PUPPETEER_EXECUTABLE_PATH} --version` : 
+            'google-chrome-stable --version');
+          console.log('Chrome Debug: Chrome version:', chromeVersion.toString());
+        } catch (versionError) {
+          console.error('Chrome Debug: Error checking Chrome version:', versionError.message);
+        }
+
+        console.log('Chrome Debug: Starting Puppeteer launch with timeout of 60000ms...');
         this.browser = await puppeteer.launch({
           headless: 'new',
           args: [
@@ -97,7 +139,8 @@ class BrowserManager {
           handleSIGINT: false,
           handleSIGTERM: false,
           handleSIGHUP: false,
-          dumpio: true // Output browser console to Node process for debugging
+          dumpio: true, // Output browser console to Node process for debugging
+          executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
         });
 
         console.log('Browser launched successfully');
@@ -265,24 +308,43 @@ class BrowserManager {
         console.error('Error details:', error);
         // Try one more time with minimal configuration
         if (!this.browser) {
-          console.log('Retrying with minimal configuration...');
-          this.browser = await puppeteer.launch({
-            headless: 'new',
-            args: [
-              '--no-sandbox',
-              '--disable-setuid-sandbox',
-              '--disable-dev-shm-usage',
-              '--disable-gpu',
-              '--no-first-run',
-              '--no-zygote',
-              '--single-process'
-            ],
-            ignoreHTTPSErrors: true,
-            timeout: 60000,
-            dumpio: true
-          });
-          console.log('Browser launched with minimal configuration');
-          this.page = await this.browser.newPage();
+          console.log('Chrome Debug: Retrying with minimal configuration...');
+          try {
+            // Check for Chrome executable path
+            console.log('Chrome Debug: Retrying with executablePath:', process.env.PUPPETEER_EXECUTABLE_PATH || 'system default');
+            
+            // Try to directly verify Chrome can run with a simple command
+            try {
+              const { execSync } = require('child_process');
+              console.log('Chrome Debug: Testing Chrome with --version flag before retry');
+              execSync('google-chrome-stable --version');
+            } catch (testError) {
+              console.error('Chrome Debug: Chrome test failed:', testError.message);
+            }
+            
+            this.browser = await puppeteer.launch({
+              headless: 'new',
+              args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process'
+              ],
+              ignoreHTTPSErrors: true,
+              timeout: 90000, // Increase timeout for retry
+              dumpio: true, // Output browser console to help with debugging
+              executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+            });
+            console.log('Browser launched with minimal configuration');
+            this.page = await this.browser.newPage();
+          } catch (retryError) {
+            console.error('Chrome Debug: Complete failure to launch browser on retry:', retryError);
+            console.error('Chrome Debug: Retry error details:', retryError);
+            throw retryError; // Re-throw to let caller handle
+          }
         }
       }
       

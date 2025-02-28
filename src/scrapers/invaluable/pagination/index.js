@@ -12,6 +12,8 @@ const PaginationManager = require('./pagination-manager');
 const RequestInterceptor = require('./request-interceptor');
 const PageManager = require('./page-manager');
 const SessionManager = require('./session-manager');
+const { handlePagination } = require('./pagination-handler');
+const { requestPageResults } = require('./page-manager');
 
 // Expose the pagination module components
 module.exports = {
@@ -19,5 +21,7 @@ module.exports = {
   PaginationManager,
   RequestInterceptor,
   PageManager,
-  SessionManager
+  SessionManager,
+  handlePagination,
+  requestPageResults
 }; 

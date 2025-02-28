@@ -79,6 +79,9 @@ class UnifiedScraper {
       try {
         this.debug(`Initializing browser${retries > 0 ? ` (attempt ${retries + 1}/${maxRetries})` : ''}...`);
         
+        // Add more debugging for browser initialization
+        console.log(`[UnifiedScraper] Browser initialization attempt ${retries + 1}/${maxRetries}`);
+        
         this.browser = new BrowserManager({
           headless: this.config.headless,
           userDataDir: this.config.userDataDir
@@ -91,6 +94,14 @@ class UnifiedScraper {
       } catch (error) {
         lastError = error;
         console.error(`[UnifiedScraper] Error initializing browser (attempt ${retries + 1}/${maxRetries}):`, error.message);
+        
+        // Log more detailed error information
+        console.error(`[UnifiedScraper] Additional error details:`, {
+          errorName: error.name,
+          errorMessage: error.message,
+          stack: error.stack,
+          cause: error.cause
+        });
         
         // Close browser if it was partially created
         if (this.browser) {
