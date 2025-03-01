@@ -26,13 +26,17 @@ class PaginationManager {
     this.gcsCredentials = options.gcsCredentials || null;
     
     // Rate limiting
-    this.baseDelay = options.baseDelay || 2000;       // Base delay in ms
+    this.baseDelay = options.baseDelay || 500;       // Base delay in ms (REDUCED from 2000)
     this.maxDelay = options.maxDelay || 30000;        // Max delay in ms
-    this.minDelay = options.minDelay || 1000;         // Min delay in ms
+    this.minDelay = options.minDelay || 300;         // Min delay in ms (REDUCED from 1000)
     this.adaptiveDelay = this.baseDelay;              // Current delay (will adjust)
     this.successStreak = 0;                           // Count of consecutive successes
     this.failureStreak = 0;                           // Count of consecutive failures
     this.rateLimitDetected = false;                   // Flag for rate limiting
+    
+    // Empty page handling
+    this.emptyPagesStreak = 0;                        // Count of consecutive empty pages
+    this.maxEmptyPagesStreak = options.maxEmptyPagesStreak || 10; // Max consecutive empty pages before stopping
     
     // Retry settings
     this.maxRetries = options.maxRetries || 3;        // Max retries per page
@@ -60,7 +64,8 @@ class PaginationManager {
       avgResponseTime: 0,
       itemsPerPage: 0,
       totalItems: 0,
-      batchesSaved: 0
+      batchesSaved: 0,
+      emptyPages: 0
     };
     
     // Initialize storage manager if GCS is enabled
@@ -359,6 +364,9 @@ class PaginationManager {
     try {
       if (!pageResults || !pageResults.results || !pageResults.results[0]?.hits) {
         console.log(`⚠️ No valid hits found in page ${pageNum} results`);
+        this.emptyPagesStreak++;
+        this.stats.emptyPages++;
+        console.log(`Empty pages streak: ${this.emptyPagesStreak}/${this.maxEmptyPagesStreak}`);
         return 0;
       }
       
@@ -393,6 +401,16 @@ class PaginationManager {
           duplicates++;
         }
       });
+      
+      // If we found any new results, reset the empty pages streak
+      if (newResults > 0) {
+        this.emptyPagesStreak = 0;
+      } else {
+        // Otherwise increment it
+        this.emptyPagesStreak++;
+        this.stats.emptyPages++;
+        console.log(`Empty pages streak: ${this.emptyPagesStreak}/${this.maxEmptyPagesStreak} (no new items)`);
+      }
       
       console.log(`Page ${pageNum}: ${newResults} new items, ${duplicates} duplicates`);
       this.stats.totalItems += newResults;
@@ -476,12 +494,22 @@ class PaginationManager {
     console.log(`Starting pagination for "${this.category}" with query "${this.query}"`);
     console.log(`Estimated total pages: ${estimatedTotalPages}, processing up to ${pagesToProcess}`);
     
+    // Reset empty pages streak counter
+    this.emptyPagesStreak = 0;
+    
     // Main pagination loop
     for (let pageNum = 2; pageNum <= pagesToProcess; pageNum++) {
       // Skip if already completed
       if (this.completedPages.has(pageNum)) {
         console.log(`Page ${pageNum} already processed, skipping`);
         continue;
+      }
+      
+      // Check if we should stop due to too many consecutive empty pages
+      if (this.emptyPagesStreak >= this.maxEmptyPagesStreak) {
+        console.log(`⚠️ Stopping pagination after ${this.emptyPagesStreak} consecutive empty pages`);
+        console.log(`This likely indicates we've reached the end of available results.`);
+        break;
       }
       
       this.currentPage = pageNum;

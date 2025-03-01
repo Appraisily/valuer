@@ -46,139 +46,77 @@ async function wait(page, ms) {
 async function handlePagination(browser, params, firstPageResults, initialCookies, maxPages = 100, config = {}) {
   console.log('🔄 Iniciando manejo de paginación');
   
-  // Inicializar variables para almacenar resultados y estado
-  const allResults = JSON.parse(JSON.stringify(firstPageResults)); // Copia profunda para preservar estructura
-  const processedIds = new Set();
-  const successfulPages = new Set([1]); // La página 1 ya está procesada
-  const failedPages = new Set();
-  let skippedExistingPages = 0; // Contador para páginas omitidas por ya existir
-  
-  // Sanitizar cookies iniciales o usar las cookies recibidas en la respuesta
-  let cookiesState;
-  if (firstPageResults && firstPageResults.cookies && firstPageResults.cookies.length > 0) {
-    cookiesState = sanitizeCookies(firstPageResults.cookies);
-    console.log(`Usando ${cookiesState.length} cookies de la respuesta inicial`);
-  } else {
-    cookiesState = sanitizeCookies(initialCookies || []);
-    console.log(`Usando ${cookiesState.length} cookies iniciales proporcionadas`);
-  }
-  
-  // Extraer parámetros de navegación de los resultados de la primera página
-  const { refId, searchContext, searcher } = extractNavigationParams(firstPageResults);
-  
-  // Estado de navegación centralizado
-  const navState = {
-    refId,
-    searchContext,
-    searcher,
-    cookies: cookiesState,
-    baseUrl: API_BASE_URL
-  };
-  
-  // Procesar los resultados de la primera página
-  // Adaptamos para manejar la estructura de Invaluable donde los hits están en results[0].hits
-  const firstPageHits = firstPageResults.results?.[0]?.hits;
-  if (firstPageHits && Array.isArray(firstPageHits)) {
-    // Procesar directamente los resultados de la primera página
-    firstPageHits.forEach(item => {
-      const itemId = item.lotId || item.id || JSON.stringify(item);
-      if (!processedIds.has(itemId)) {
-        processedIds.add(itemId);
-      }
-    });
-    console.log(`Procesados ${firstPageHits.length} resultados de la primera página`);
-  } else {
-    console.warn('❌ Los resultados de la primera página no contienen hits válidos');
-    return firstPageResults; // Devolver los resultados originales sin modificar
-  }
-  
-  // Extraer metadatos de los resultados
-  // Adaptado para la estructura específica de Invaluable
-  let totalItems = 0;
-  let totalPages = 0;
-  
-  if (firstPageResults.results?.[0]?.meta?.totalHits) {
-    totalItems = firstPageResults.results[0].meta.totalHits;
-    const hitsPerPage = firstPageResults.results[0].meta.hitsPerPage || firstPageHits.length;
-    totalPages = Math.ceil(totalItems / hitsPerPage);
-    console.log(`Metadatos: ${totalItems} elementos en ${totalPages} páginas (tamaño de página: ${hitsPerPage})`);
-  } else {
-    // Fallback: usar el length de los hits y maxPages
-    totalItems = firstPageHits ? firstPageHits.length : 0;
-    totalPages = maxPages;
-    console.log(`No se encontraron metadatos completos. Usando totalItems=${totalItems}, totalPages=${totalPages}`);
-  }
-  
-  // Calcular cuántas páginas procesar (basado en el mínimo entre maxPages y totalPages)
-  const pagesToProcess = Math.min(maxPages, totalPages || 1);
-  console.log(`Procesando ${pagesToProcess} páginas en total (de un total de ${totalPages || 'desconocido'})`);
-  
-  // Guardar primera página en GCS con formato page_XXXX.json
   try {
-    // Determinar la categoría/consulta para guardar
-    const category = params.query || 'uncategorized';
-    // Guardar la primera página
-    const firstPagePath = await searchStorage.savePageResults(category, 1, firstPageResults);
-    console.log(`✅ Primera página guardada en GCS: ${firstPagePath}`);
-  } catch (storageError) {
-    console.error(`❌ Error al guardar primera página en GCS: ${storageError.message}`);
-    // Continuar a pesar del error
-  }
-  
-  // Si solo hay una página, devolver resultados directamente
-  if (pagesToProcess <= 1) {
-    console.log('Solo hay una página de resultados, finalizando');
-    return allResults;
-  }
-  
-  // Crear una nueva pestaña para las solicitudes API
-  const page = await browser.createTab('paginationTab');
-  
-  try {
-    // Navegar a Invaluable para establecer cookies
-    await page.goto('https://www.invaluable.com', { waitUntil: 'domcontentloaded' });
+    // Verificar si tenemos resultados iniciales válidos
+    if (!firstPageResults || !firstPageResults.results || !firstPageResults.results[0]?.hits) {
+      console.error('Los resultados de la primera página son inválidos, no se puede continuar con la paginación');
+      return firstPageResults || { error: 'Resultados inválidos' };
+    }
     
-    // Extraer refId y searchContext del estado inicial si es necesario
-    if (!navState.refId || !navState.searchContext) {
+    // Obtener la página principal para hacer solicitudes
+    const page = browser.getPage();
+    
+    // Inicializar estructuras para resultados y seguimiento
+    const allResults = JSON.parse(JSON.stringify(firstPageResults));
+    const processedIds = new Set();
+    const successfulPages = new Set([1]); // La página 1 ya se procesó correctamente
+    const failedPages = new Set();
+    const processedPages = new Set([1]);
+    
+    // Contador para páginas vacías consecutivas
+    let consecutiveEmptyPages = 0;
+    const maxConsecutiveEmptyPages = 10;
+    
+    // Extraer información de navegación de la primera página
+    const navState = extractNavigationParams(firstPageResults);
+    navState.cookies = initialCookies;
+    
+    // Identificar los elementos de la primera página
+    if (firstPageResults.results && firstPageResults.results[0] && Array.isArray(firstPageResults.results[0].hits)) {
+      firstPageResults.results[0].hits.forEach(item => {
+        const itemId = item.lotId || item.id || JSON.stringify(item);
+        processedIds.add(itemId);
+      });
+    }
+    
+    // Determinar el número total de páginas
+    const totalItems = firstPageResults.results[0]?.meta?.totalHits || 0;
+    const hitsPerPage = firstPageResults.results[0]?.meta?.hitsPerPage || 48;
+    const totalPages = Math.ceil(totalItems / hitsPerPage);
+    
+    // Limitar el número de páginas a procesar
+    const pagesToProcess = Math.min(totalPages, maxPages);
+    
+    console.log(`Encontrados ${totalItems} elementos en total, distribuidos en aproximadamente ${totalPages} páginas`);
+    console.log(`Se procesarán hasta ${pagesToProcess} páginas`);
+    
+    // Almacenar la primera página si es solicitado
+    if (config.saveToStorage) {
       try {
-        console.log('Intentando extraer parámetros del estado inicial de la aplicación...');
-        const initialStateParams = await extractFromInitialState(page);
-        if (initialStateParams.refId) navState.refId = initialStateParams.refId;
-        if (initialStateParams.searchContext) navState.searchContext = initialStateParams.searchContext;
-        if (initialStateParams.searcher) navState.searcher = initialStateParams.searcher;
-      } catch (error) {
-        console.warn(`⚠️ No se pudieron extraer parámetros del estado inicial: ${error.message}`);
+        await searchStorage.saveSearch(`page_${String(1).padStart(4, '0')}.json`, firstPageResults);
+        console.log(`✅ Página 1 guardada en almacenamiento`);
+      } catch (storageError) {
+        console.error(`Error al guardar página 1 en almacenamiento: ${storageError.message}`);
       }
     }
     
-    // Configurar interceptación de solicitudes
-    await setupRequestInterception(page, navState, 1, async (response, status) => {
-      // Este callback se llamará cuando se reciba una respuesta API
-    });
-    
-    // Procesar páginas restantes (2 en adelante)
+    // Iterar por cada página restante
     for (let pageNum = 2; pageNum <= pagesToProcess; pageNum++) {
       // Evitar procesamiento redundante
-      if (successfulPages.has(pageNum)) {
-        console.log(`Página ${pageNum} ya procesada, saltando`);
+      if (processedPages.has(pageNum)) {
+        console.log(`Página ${pageNum} ya procesada anteriormente, omitiendo...`);
         continue;
       }
       
-      // Verificar si la página ya existe en GCS (para reanudación)
-      try {
-        const category = params.query || 'uncategorized';
-        const subcategory = params.furnitureSubcategory || null;
-        const pageExists = await searchStorage.pageResultsExist(category, pageNum, subcategory);
-        if (pageExists) {
-          console.log(`Página ${pageNum} ya existe en GCS${subcategory ? ` para subcategoría '${subcategory}'` : ''}, saltando`);
-          successfulPages.add(pageNum);
-          skippedExistingPages++; // Incrementar contador de páginas omitidas
-          continue;
-        }
-      } catch (checkError) {
-        console.warn(`⚠️ Error al verificar si la página ${pageNum} existe: ${checkError.message}`);
-        // Continuar procesando la página incluso si hay error al verificar
+      // Detener si hay demasiadas páginas vacías consecutivas
+      if (consecutiveEmptyPages >= maxConsecutiveEmptyPages) {
+        console.log(`⚠️ Se encontraron ${consecutiveEmptyPages} páginas vacías consecutivas. Finalizando la paginación.`);
+        console.log(`Probablemente se han obtenido todos los resultados disponibles.`);
+        break;
       }
+      
+      // Marcar como procesada
+      processedPages.add(pageNum);
       
       console.log(`\n----- Procesando página ${pageNum} de ${pagesToProcess} -----`);
       
@@ -293,8 +231,11 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
           if (hasDifferentResults) {
             successfulPages.add(pageNum);
             failedPages.delete(pageNum); // Eliminar de fallidos si estaba
+            consecutiveEmptyPages = 0; // Resetear contador de páginas vacías
           } else {
             console.warn(`❌ Página ${pageNum} no contiene resultados diferentes, posible problema de paginación`);
+            consecutiveEmptyPages++; // Incrementar contador de páginas vacías
+            console.log(`Páginas vacías consecutivas: ${consecutiveEmptyPages}/${maxConsecutiveEmptyPages}`);
           }
           
           // Actualizar metadatos en el resultado acumulado
@@ -311,9 +252,9 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
             break;
           }
           
-          // Añadir un retraso deliberado entre páginas (2-3 segundos)
+          // Añadir un retraso deliberado entre páginas (0.3-0.5 segundos)
           try {
-            const pagePauseTime = 2000 + Math.floor(Math.random() * 1000); // 2-3 segundos
+            const pagePauseTime = 300 + Math.floor(Math.random() * 200); // 0.3-0.5 segundos
             console.log(`⏱️ Esperando ${pagePauseTime}ms antes de procesar la siguiente página...`);
             await wait(page, pagePauseTime);
           } catch (waitError) {
@@ -322,6 +263,8 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
         } else {
           console.error(`❌ Error al procesar la página ${pageNum}: formato de respuesta inválido`);
           failedPages.add(pageNum);
+          consecutiveEmptyPages++; // Incrementar contador de páginas vacías
+          console.log(`Páginas vacías consecutivas: ${consecutiveEmptyPages}/${maxConsecutiveEmptyPages}`);
         }
       } catch (error) {
         console.error(`❌ Error en la página ${pageNum}: ${error.message}`);
@@ -356,14 +299,12 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
     // Añadir información de paginación al resultado
     allResults.pagesRetrieved = Array.from(successfulPages);
     allResults.failedPages = Array.from(failedPages);
-    allResults.skippedExistingPages = skippedExistingPages;
     allResults.totalPagesFound = totalPages;
     allResults.finalCookies = navState.cookies;
     
     console.log(`\n===== Resultados finales =====`);
     console.log(`✅ Total de resultados obtenidos: ${allResults.results[0].hits.length}`);
     console.log(`✅ Páginas procesadas con éxito: ${successfulPages.size}`);
-    console.log(`ℹ️ Páginas omitidas (ya existentes en GCS): ${skippedExistingPages}`);
     console.log(`❌ Páginas con errores: ${failedPages.size}`);
   }
   
