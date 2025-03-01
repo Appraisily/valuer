@@ -46,6 +46,19 @@ async function wait(page, ms) {
 async function handlePagination(browser, params, firstPageResults, initialCookies, maxPages = 100, config = {}) {
   console.log('🔄 Iniciando manejo de paginación');
   
+  // Initialize variables outside the try block to avoid "undefined" errors in the finally block
+  let allResults = { error: 'Resultados no inicializados' };
+  let processedIds = new Set();
+  let successfulPages = new Set();
+  let failedPages = new Set();
+  let processedPages = new Set();
+  let totalPages = 0;
+  let navState = { cookies: initialCookies || [] };
+  
+  // Contador para páginas vacías consecutivas
+  let consecutiveEmptyPages = 0;
+  const maxConsecutiveEmptyPages = 10;
+  
   try {
     // Verificar si tenemos resultados iniciales válidos
     if (!firstPageResults || !firstPageResults.results || !firstPageResults.results[0]?.hits) {
@@ -57,18 +70,14 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
     const page = browser.getPage();
     
     // Inicializar estructuras para resultados y seguimiento
-    const allResults = JSON.parse(JSON.stringify(firstPageResults));
-    const processedIds = new Set();
-    const successfulPages = new Set([1]); // La página 1 ya se procesó correctamente
-    const failedPages = new Set();
-    const processedPages = new Set([1]);
-    
-    // Contador para páginas vacías consecutivas
-    let consecutiveEmptyPages = 0;
-    const maxConsecutiveEmptyPages = 10;
+    allResults = JSON.parse(JSON.stringify(firstPageResults));
+    processedIds = new Set();
+    successfulPages = new Set([1]); // La página 1 ya se procesó correctamente
+    failedPages = new Set();
+    processedPages = new Set([1]);
     
     // Extraer información de navegación de la primera página
-    const navState = extractNavigationParams(firstPageResults);
+    navState = extractNavigationParams(firstPageResults);
     navState.cookies = initialCookies;
     
     // Identificar los elementos de la primera página
@@ -82,7 +91,7 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
     // Determinar el número total de páginas
     const totalItems = firstPageResults.results[0]?.meta?.totalHits || 0;
     const hitsPerPage = firstPageResults.results[0]?.meta?.hitsPerPage || 48;
-    const totalPages = Math.ceil(totalItems / hitsPerPage);
+    totalPages = Math.ceil(totalItems / hitsPerPage);
     
     // Limitar el número de páginas a procesar
     const pagesToProcess = Math.min(totalPages, maxPages);
@@ -293,19 +302,35 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
   } catch (error) {
     console.error(`Error general durante la paginación: ${error.message}`);
   } finally {
-    // Cerrar la pestaña
-    await browser.closeTab('paginationTab');
-    
-    // Añadir información de paginación al resultado
-    allResults.pagesRetrieved = Array.from(successfulPages);
-    allResults.failedPages = Array.from(failedPages);
-    allResults.totalPagesFound = totalPages;
-    allResults.finalCookies = navState.cookies;
-    
-    console.log(`\n===== Resultados finales =====`);
-    console.log(`✅ Total de resultados obtenidos: ${allResults.results[0].hits.length}`);
-    console.log(`✅ Páginas procesadas con éxito: ${successfulPages.size}`);
-    console.log(`❌ Páginas con errores: ${failedPages.size}`);
+    try {
+      // Cerrar la pestaña si existe
+      if (browser && typeof browser.closeTab === 'function') {
+        await browser.closeTab('paginationTab');
+      }
+      
+      // Añadir información de paginación al resultado solo si allResults está bien inicializado
+      if (allResults && typeof allResults === 'object') {
+        allResults.pagesRetrieved = Array.from(successfulPages);
+        allResults.failedPages = Array.from(failedPages);
+        allResults.totalPagesFound = totalPages;
+        
+        if (navState && navState.cookies) {
+          allResults.finalCookies = navState.cookies;
+        }
+        
+        // Solo mostrar esta información si tenemos resultados válidos
+        if (allResults.results && allResults.results[0] && allResults.results[0].hits) {
+          console.log(`\n===== Resultados finales =====`);
+          console.log(`✅ Total de resultados obtenidos: ${allResults.results[0].hits.length}`);
+          console.log(`✅ Páginas procesadas con éxito: ${successfulPages.size}`);
+          console.log(`❌ Páginas con errores: ${failedPages.size}`);
+        } else {
+          console.log(`\n===== Paginación finalizada sin resultados válidos =====`);
+        }
+      }
+    } catch (finallyError) {
+      console.error(`Error en bloque finally: ${finallyError.message}`);
+    }
   }
   
   return allResults;
