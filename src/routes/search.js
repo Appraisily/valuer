@@ -14,93 +14,132 @@ function formatPrice(hit) {
 }
 
 function formatSearchResults(catResults) {
-  if (!catResults?.results?.[0]?.hits) {
-    // Try direct format where hits may be at the root level
-    if (catResults.hits && Array.isArray(catResults.hits)) {
-      const lots = catResults.hits.map(hit => ({
-        title: hit.lotTitle,
-        date: hit.dateTimeLocal,
-        auctionHouse: hit.houseName,
-        price: formatPrice(hit),
-        image: hit.photoPath,
-        lotNumber: hit.lotNumber,
-        saleType: hit.saleType
-      }));
-      
-      // Extract metadata
-      let totalItems = catResults.nbHits || 0;
-      let totalPages = catResults.nbPages || 0;
-      let itemsPerPage = catResults.hitsPerPage || 96;
-      
-      return {
-        lots,
-        totalResults: lots.length,
-        pagination: {
-          totalItems,
-          totalPages,
-          itemsPerPage,
-          currentPage: catResults.page || 0
-        }
-      };
-    }
-    
+  if (!catResults) {
     return { lots: [], totalResults: 0, pagination: { totalItems: 0, totalPages: 0 } };
   }
 
-  const hits = catResults.results[0].hits;
-  const lots = hits.map(hit => ({
-    title: hit.lotTitle,
-    date: hit.dateTimeLocal,
-    auctionHouse: hit.houseName,
-    price: formatPrice(hit),
-    image: hit.photoPath,
-    lotNumber: hit.lotNumber,
-    saleType: hit.saleType
-  }));
-
-  // Extract pagination metadata
-  let totalItems = 0;
-  let totalPages = 0;
-  let itemsPerPage = 96; // Default value used by Invaluable
-
-  // Check for metadata in different possible locations
-  if (catResults.results?.[0]?.meta?.totalHits) {
-    // Standard metadata location
-    totalItems = catResults.results[0].meta.totalHits;
-    itemsPerPage = catResults.results[0].meta.hitsPerPage || itemsPerPage;
-  } else if (catResults.nbHits) {
-    // Algolia direct response format
-    totalItems = catResults.nbHits;
-    itemsPerPage = catResults.hitsPerPage || itemsPerPage;
-    // If nbPages is available, use it directly
-    if (catResults.nbPages) {
-      totalPages = catResults.nbPages;
-    }
-  } else if (catResults.results?.[0]?.nbHits) {
-    // Alternative Algolia format
-    totalItems = catResults.results[0].nbHits;
-    itemsPerPage = catResults.results[0].hitsPerPage || itemsPerPage;
-    // If nbPages is available, use it directly
-    if (catResults.results[0].nbPages) {
-      totalPages = catResults.results[0].nbPages;
-    }
+  // Direct root level properties check first - this seems to be the most common format
+  if ('nbPages' in catResults && Array.isArray(catResults.hits)) {
+    console.log('Formatting search results from root level properties');
+    const lots = catResults.hits.map(hit => ({
+      title: hit.lotTitle,
+      date: hit.dateTimeLocal,
+      auctionHouse: hit.houseName,
+      price: formatPrice(hit),
+      image: hit.photoPath,
+      lotNumber: hit.lotNumber,
+      saleType: hit.saleType
+    }));
+    
+    // Extract metadata
+    let totalItems = catResults.nbHits || 0;
+    let totalPages = catResults.nbPages || 0;
+    let itemsPerPage = catResults.hitsPerPage || 96;
+    
+    return {
+      lots,
+      totalResults: lots.length,
+      pagination: {
+        totalItems,
+        totalPages,
+        itemsPerPage,
+        currentPage: catResults.page || 0
+      }
+    };
   }
+  
+  // Standard nested format
+  if (catResults?.results?.[0]?.hits) {
+    console.log('Formatting search results from standard nested format');
+    const hits = catResults.results[0].hits;
+    const lots = hits.map(hit => ({
+      title: hit.lotTitle,
+      date: hit.dateTimeLocal,
+      auctionHouse: hit.houseName,
+      price: formatPrice(hit),
+      image: hit.photoPath,
+      lotNumber: hit.lotNumber,
+      saleType: hit.saleType
+    }));
 
-  // Calculate total pages if not directly available
-  if (totalPages === 0 && totalItems > 0) {
-    totalPages = Math.ceil(totalItems / itemsPerPage);
-  }
+    // Extract pagination metadata
+    let totalItems = 0;
+    let totalPages = 0;
+    let itemsPerPage = 96; // Default value used by Invaluable
 
-  return {
-    lots,
-    totalResults: lots.length,
-    pagination: {
-      totalItems,
-      totalPages,
-      itemsPerPage,
-      currentPage: catResults.results?.[0]?.meta?.page || catResults.results?.[0]?.page || catResults.page || 0
+    // Check for metadata in different possible locations
+    if (catResults.results?.[0]?.meta?.totalHits) {
+      // Standard metadata location
+      totalItems = catResults.results[0].meta.totalHits;
+      itemsPerPage = catResults.results[0].meta.hitsPerPage || itemsPerPage;
+    } else if (catResults.nbHits) {
+      // Algolia direct response format
+      totalItems = catResults.nbHits;
+      itemsPerPage = catResults.hitsPerPage || itemsPerPage;
+      // If nbPages is available, use it directly
+      if (catResults.nbPages) {
+        totalPages = catResults.nbPages;
+      }
+    } else if (catResults.results?.[0]?.nbHits) {
+      // Alternative Algolia format
+      totalItems = catResults.results[0].nbHits;
+      itemsPerPage = catResults.results[0].hitsPerPage || itemsPerPage;
+      // If nbPages is available, use it directly
+      if (catResults.results[0].nbPages) {
+        totalPages = catResults.results[0].nbPages;
+      }
     }
-  };
+
+    // Calculate total pages if not directly available
+    if (totalPages === 0 && totalItems > 0) {
+      totalPages = Math.ceil(totalItems / itemsPerPage);
+    }
+
+    return {
+      lots,
+      totalResults: lots.length,
+      pagination: {
+        totalItems,
+        totalPages,
+        itemsPerPage,
+        currentPage: catResults.results?.[0]?.meta?.page || catResults.results?.[0]?.page || catResults.page || 0
+      }
+    };
+  }
+  
+  // Try other Algolia format where hits may be at the root level
+  if (Array.isArray(catResults.hits)) {
+    console.log('Formatting search results from alternate root hits format');
+    const lots = catResults.hits.map(hit => ({
+      title: hit.lotTitle,
+      date: hit.dateTimeLocal,
+      auctionHouse: hit.houseName,
+      price: formatPrice(hit),
+      image: hit.photoPath,
+      lotNumber: hit.lotNumber,
+      saleType: hit.saleType
+    }));
+    
+    // Extract metadata
+    let totalItems = catResults.nbHits || 0;
+    let totalPages = catResults.nbPages || 0;
+    let itemsPerPage = catResults.hitsPerPage || 96;
+    
+    return {
+      lots,
+      totalResults: lots.length,
+      pagination: {
+        totalItems,
+        totalPages,
+        itemsPerPage,
+        currentPage: catResults.page || 0
+      }
+    };
+  }
+  
+  console.warn('No recognized format found in search results. Available keys:', Object.keys(catResults).join(', '));
+  // No recognized format
+  return { lots: [], totalResults: 0, pagination: { totalItems: 0, totalPages: 0 } };
 }
 
 function standardizeResponse(data, parameters = {}) {
@@ -208,23 +247,32 @@ router.get('/', async (req, res) => {
             let totalPages = 0;
             let foundMetadata = false;
             
-            // Check different possible locations for metadata
-            if (initialResult?.results?.[0]?.meta?.totalHits) {
-                // Standard format
-                totalHits = initialResult.results[0].meta.totalHits;
-                const hitsPerPage = initialResult.results[0].meta.hitsPerPage || 96;
-                totalPages = Math.ceil(totalHits / hitsPerPage);
-                foundMetadata = true;
-            } else if (initialResult?.nbHits && initialResult?.nbPages) {
-                // Alternate format (as seen in screenshot)
-                totalHits = initialResult.nbHits;
-                totalPages = initialResult.nbPages;
-                foundMetadata = true;
-            } else if (initialResult?.results?.[0]?.nbHits) {
-                // Another alternate format
-                totalHits = initialResult.results[0].nbHits;
-                totalPages = initialResult.results[0].nbPages || Math.ceil(totalHits / 96);
-                foundMetadata = true;
+            console.log('Checking for pagination metadata in API response');
+            
+            // First check if nbPages exists directly at the root level
+            if (initialResult && typeof initialResult === 'object') {
+                // Direct root level properties
+                if ('nbPages' in initialResult) {
+                    console.log('Found nbPages directly at root level');
+                    totalPages = initialResult.nbPages;
+                    totalHits = initialResult.nbHits || 0;
+                    foundMetadata = true;
+                }
+                // Check for metadata in different possible locations if not found at root
+                else if (initialResult?.results?.[0]?.meta?.totalHits) {
+                    // Standard format
+                    console.log('Found metadata in standard format: results[0].meta');
+                    totalHits = initialResult.results[0].meta.totalHits;
+                    const hitsPerPage = initialResult.results[0].meta.hitsPerPage || 96;
+                    totalPages = Math.ceil(totalHits / hitsPerPage);
+                    foundMetadata = true;
+                } else if (initialResult?.results?.[0]?.nbHits) {
+                    // Another alternate format
+                    console.log('Found metadata in alternate format: results[0] direct properties');
+                    totalHits = initialResult.results[0].nbHits;
+                    totalPages = initialResult.results[0].nbPages || Math.ceil(totalHits / 96);
+                    foundMetadata = true;
+                }
             }
             
             if (foundMetadata) {
@@ -264,6 +312,8 @@ router.get('/', async (req, res) => {
                 console.log(`Fetching all pages (up to ${finalMaxPages})`);
                 result = await invaluableScraper.searchAllPages(searchParams, cookies, finalMaxPages);
                 
+                console.error('Failed to find pagination metadata. Response keys available:', 
+                    Object.keys(initialResult || {}).join(', '));
                 console.debug('API response structure: ' + 
                     JSON.stringify(initialResult, null, 2).substring(0, 500) + '...');
             }

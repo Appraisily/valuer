@@ -182,33 +182,50 @@ router.get('/scrape/:subcategory', async (req, res) => {
       // Make a single page request to get metadata
       const initialResult = await invaluableScraper.search(searchParams, cookies);
       
-      if (!initialResult || !initialResult.results || !initialResult.results[0] || !initialResult.results[0].meta) {
-        return res.status(404).json({
-          success: false,
-          error: 'Failed to get pagination metadata',
-          message: 'Could not determine total pages from API response. Response structure: ' + 
-            JSON.stringify(initialResult, null, 2).substring(0, 500) + '...'
-        });
-      }
-      
       // Extract total pages from the metadata
       let totalHits = 0;
       let totalPages = 0;
+      let foundMetadata = false;
+
+      console.log('Checking for pagination metadata in API response');
       
-      // Check different possible locations for metadata
-      if (initialResult.results?.[0]?.meta?.totalHits) {
-        // Standard format
-        totalHits = initialResult.results[0].meta.totalHits;
-        const hitsPerPage = initialResult.results[0].meta.hitsPerPage || 96;
-        totalPages = Math.ceil(totalHits / hitsPerPage);
-      } else if (initialResult.nbHits && initialResult.nbPages) {
-        // Alternate format (as seen in screenshot)
-        totalHits = initialResult.nbHits;
-        totalPages = initialResult.nbPages;
-      } else if (initialResult.results?.[0]?.nbHits) {
-        // Another alternate format
-        totalHits = initialResult.results[0].nbHits;
-        totalPages = initialResult.results[0].nbPages || Math.ceil(totalHits / 96);
+      // First check if nbPages exists directly at the root level
+      if (initialResult && typeof initialResult === 'object') {
+        // Direct root level properties
+        if ('nbPages' in initialResult) {
+          console.log('Found nbPages directly at root level');
+          totalPages = initialResult.nbPages;
+          totalHits = initialResult.nbHits || 0;
+          foundMetadata = true;
+        }
+        // Check for metadata in different possible locations if not found at root
+        else if (initialResult.results?.[0]?.meta?.totalHits) {
+          // Standard format
+          console.log('Found metadata in standard format: results[0].meta');
+          totalHits = initialResult.results[0].meta.totalHits;
+          const hitsPerPage = initialResult.results[0].meta.hitsPerPage || 96;
+          totalPages = Math.ceil(totalHits / hitsPerPage);
+          foundMetadata = true;
+        } else if (initialResult.results?.[0]?.nbHits) {
+          // Another alternate format
+          console.log('Found metadata in alternate format: results[0] direct properties');
+          totalHits = initialResult.results[0].nbHits;
+          totalPages = initialResult.results[0].nbPages || Math.ceil(totalHits / 96);
+          foundMetadata = true;
+        }
+      }
+      
+      if (!foundMetadata) {
+        // Log the entire structure for debugging
+        console.error('Failed to find pagination metadata. Response structure:', 
+          JSON.stringify(initialResult, null, 2).substring(0, 1000));
+        
+        return res.status(404).json({
+          success: false,
+          error: 'Failed to get pagination metadata',
+          message: 'Could not determine total pages from API response. Response keys available: ' + 
+            Object.keys(initialResult || {}).join(', ')
+        });
       }
       
       if (totalPages <= 0) {
