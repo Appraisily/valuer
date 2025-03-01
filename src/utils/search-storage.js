@@ -53,6 +53,9 @@ class SearchStorageService {
     
     if (subcategory) {
       // If subcategory is provided, use a nested path structure
+      // This now represents the keyword/query pattern where:
+      // - category is the keyword (e.g., "furniture", "collectible")
+      // - subcategory is the query (e.g., "furniture", "memorabilia")
       const sanitizedCategory = this.sanitizeName(category);
       const sanitizedSubcategory = this.sanitizeName(subcategory);
       return `invaluable-data/${sanitizedCategory}/${sanitizedSubcategory}/page_${paddedPage}.json`;
@@ -65,10 +68,10 @@ class SearchStorageService {
   
   /**
    * Save single page of results to GCS
-   * @param {string} category - Category/search term used
+   * @param {string} category - Category/search term used (this will be the keyword folder)
    * @param {number} pageNumber - Page number
    * @param {object} rawResults - Raw JSON response from the API
-   * @param {string} subcategory - Optional subcategory name
+   * @param {string} subcategory - Optional subcategory name (this will be the query subfolder)
    * @returns {Promise<string>} - GCS file path
    */
   async savePageResults(category, pageNumber, rawResults, subcategory = null) {
@@ -98,9 +101,9 @@ class SearchStorageService {
   
   /**
    * Check if page results exist
-   * @param {string} category - Category/search term used
+   * @param {string} category - Category/search term used (keyword folder)
    * @param {number} pageNumber - Page number
-   * @param {string} subcategory - Optional subcategory name
+   * @param {string} subcategory - Optional subcategory name (query subfolder)
    * @returns {Promise<boolean>} - Whether the file exists
    */
   async pageResultsExist(category, pageNumber, subcategory = null) {
@@ -122,8 +125,8 @@ class SearchStorageService {
   
   /**
    * List all existing pages for a category and subcategory
-   * @param {string} category - Main category
-   * @param {string} subcategory - Optional subcategory 
+   * @param {string} category - Main category (keyword folder)
+   * @param {string} subcategory - Optional subcategory (query subfolder)
    * @returns {Promise<Array<number>>} - Array of existing page numbers
    */
   async listExistingPages(category, subcategory = null) {

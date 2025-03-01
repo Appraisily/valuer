@@ -1,8 +1,8 @@
 # PowerShell script to scrape all collectibles subcategories from Invaluable
 # This script calls the API endpoint for each subcategory of collectibles
 
-# API base URL - using the same endpoint as furniture but will specify collectibles in the subcategory names
-$apiBaseUrl = "https://valuer-dev-856401495068.us-central1.run.app/api/furniture/scrape"
+# API base URL - using the new generic endpoint
+$apiBaseUrl = "https://valuer-dev-856401495068.us-central1.run.app/api/invaluable/scrape"
 
 # Define all subcategories in the Collectibles category
 $subcategories = @(
@@ -40,8 +40,11 @@ foreach ($subcategory in $subcategories) {
     Write-Host ""
     Write-Host "Scraping: $subcategory" -ForegroundColor Green
     
-    # Call the API endpoint for this subcategory with fetchAllPages=true
-    curl "$apiBaseUrl/$encodedSubcategory`?fetchAllPages=true&category=collectibles"
+    # Call the API endpoint with the new keyword/query structure
+    # - keyword=collectible (folder name)
+    # - query=collectible (subfolder name)
+    # - category=Collectibles (for URL building)
+    curl "$apiBaseUrl/$encodedSubcategory`?fetchAllPages=true&keyword=collectible&query=collectible&category=Collectibles"
     
     Write-Host "`nCompleted $subcategory. Waiting 10 seconds before next request...`n"
     Start-Sleep -Seconds 10

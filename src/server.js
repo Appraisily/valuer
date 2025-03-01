@@ -4,6 +4,7 @@ const path = require('path');
 const searchRouter = require('./routes/search');
 const scraperRouter = require('./routes/scraper');
 const furnitureSubcategoriesRouter = require('./routes/furniture-subcategories');
+const generalScraperRouter = require('./routes/general-scraper');
 const InvaluableScraper = require('./scrapers/invaluable');
 
 const port = process.env.PORT || 8080;
@@ -67,7 +68,7 @@ async function initializeScraper() {
 }
 
 // Set up middleware to initialize scraper only when needed
-app.use(['/api/search', '/api/furniture'], async (req, res, next) => {
+app.use(['/api/search', '/api/furniture', '/api/invaluable'], async (req, res, next) => {
   try {
     await initializeScraper();
     next();
@@ -87,6 +88,7 @@ async function startServer() {
     app.use('/api/search', searchRouter);
     app.use('/api/scraper', scraperRouter);
     app.use('/api/furniture', furnitureSubcategoriesRouter);
+    app.use('/api/invaluable', generalScraperRouter);
     
     const server = app.listen(port, '0.0.0.0', () => {
       console.log(`Server is now listening on port ${port}`);
