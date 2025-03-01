@@ -186,14 +186,41 @@ router.get('/scrape/:subcategory', async (req, res) => {
         return res.status(404).json({
           success: false,
           error: 'Failed to get pagination metadata',
-          message: 'Could not determine total pages from API response.'
+          message: 'Could not determine total pages from API response. Response structure: ' + 
+            JSON.stringify(initialResult, null, 2).substring(0, 500) + '...'
         });
       }
       
       // Extract total pages from the metadata
-      const totalHits = initialResult.results[0].meta.totalHits || 0;
-      const hitsPerPage = initialResult.results[0].meta.hitsPerPage || 96;
-      maxPages = Math.ceil(totalHits / hitsPerPage);
+      let totalHits = 0;
+      let totalPages = 0;
+      
+      // Check different possible locations for metadata
+      if (initialResult.results?.[0]?.meta?.totalHits) {
+        // Standard format
+        totalHits = initialResult.results[0].meta.totalHits;
+        const hitsPerPage = initialResult.results[0].meta.hitsPerPage || 96;
+        totalPages = Math.ceil(totalHits / hitsPerPage);
+      } else if (initialResult.nbHits && initialResult.nbPages) {
+        // Alternate format (as seen in screenshot)
+        totalHits = initialResult.nbHits;
+        totalPages = initialResult.nbPages;
+      } else if (initialResult.results?.[0]?.nbHits) {
+        // Another alternate format
+        totalHits = initialResult.results[0].nbHits;
+        totalPages = initialResult.results[0].nbPages || Math.ceil(totalHits / 96);
+      }
+      
+      if (totalPages <= 0) {
+        return res.status(404).json({
+          success: false,
+          error: 'Failed to get pagination metadata',
+          message: 'Could not determine total pages from API response. Response structure: ' + 
+            JSON.stringify(initialResult, null, 2).substring(0, 500) + '...'
+        });
+      }
+      
+      maxPages = totalPages;
       
       console.log(`API reports ${totalHits} total items across ${maxPages} pages for subcategory "${subcategoryName}"`);
       

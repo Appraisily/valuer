@@ -15,6 +15,35 @@ function formatPrice(hit) {
 
 function formatSearchResults(catResults) {
   if (!catResults?.results?.[0]?.hits) {
+    // Try direct format where hits may be at the root level
+    if (catResults.hits && Array.isArray(catResults.hits)) {
+      const lots = catResults.hits.map(hit => ({
+        title: hit.lotTitle,
+        date: hit.dateTimeLocal,
+        auctionHouse: hit.houseName,
+        price: formatPrice(hit),
+        image: hit.photoPath,
+        lotNumber: hit.lotNumber,
+        saleType: hit.saleType
+      }));
+      
+      // Extract metadata
+      let totalItems = catResults.nbHits || 0;
+      let totalPages = catResults.nbPages || 0;
+      let itemsPerPage = catResults.hitsPerPage || 96;
+      
+      return {
+        lots,
+        totalResults: lots.length,
+        pagination: {
+          totalItems,
+          totalPages,
+          itemsPerPage,
+          currentPage: catResults.page || 0
+        }
+      };
+    }
+    
     return { lots: [], totalResults: 0, pagination: { totalItems: 0, totalPages: 0 } };
   }
 
@@ -43,14 +72,24 @@ function formatSearchResults(catResults) {
     // Algolia direct response format
     totalItems = catResults.nbHits;
     itemsPerPage = catResults.hitsPerPage || itemsPerPage;
+    // If nbPages is available, use it directly
+    if (catResults.nbPages) {
+      totalPages = catResults.nbPages;
+    }
   } else if (catResults.results?.[0]?.nbHits) {
     // Alternative Algolia format
     totalItems = catResults.results[0].nbHits;
     itemsPerPage = catResults.results[0].hitsPerPage || itemsPerPage;
+    // If nbPages is available, use it directly
+    if (catResults.results[0].nbPages) {
+      totalPages = catResults.results[0].nbPages;
+    }
   }
 
-  // Calculate total pages
-  totalPages = Math.ceil(totalItems / itemsPerPage);
+  // Calculate total pages if not directly available
+  if (totalPages === 0 && totalItems > 0) {
+    totalPages = Math.ceil(totalItems / itemsPerPage);
+  }
 
   return {
     lots,
@@ -59,7 +98,7 @@ function formatSearchResults(catResults) {
       totalItems,
       totalPages,
       itemsPerPage,
-      currentPage: catResults.results?.[0]?.meta?.page || 1
+      currentPage: catResults.results?.[0]?.meta?.page || catResults.results?.[0]?.page || catResults.page || 0
     }
   };
 }
@@ -164,12 +203,32 @@ router.get('/', async (req, res) => {
             // Make a single page request to get metadata
             const initialResult = await invaluableScraper.search(searchParams, cookies);
             
-            if (initialResult && initialResult.results && initialResult.results[0] && initialResult.results[0].meta) {
-                // Extract total pages from the metadata
-                const totalHits = initialResult.results[0].meta.totalHits || 0;
+            // Extract total pages from the metadata
+            let totalHits = 0;
+            let totalPages = 0;
+            let foundMetadata = false;
+            
+            // Check different possible locations for metadata
+            if (initialResult?.results?.[0]?.meta?.totalHits) {
+                // Standard format
+                totalHits = initialResult.results[0].meta.totalHits;
                 const hitsPerPage = initialResult.results[0].meta.hitsPerPage || 96;
-                finalMaxPages = Math.ceil(totalHits / hitsPerPage);
-                
+                totalPages = Math.ceil(totalHits / hitsPerPage);
+                foundMetadata = true;
+            } else if (initialResult?.nbHits && initialResult?.nbPages) {
+                // Alternate format (as seen in screenshot)
+                totalHits = initialResult.nbHits;
+                totalPages = initialResult.nbPages;
+                foundMetadata = true;
+            } else if (initialResult?.results?.[0]?.nbHits) {
+                // Another alternate format
+                totalHits = initialResult.results[0].nbHits;
+                totalPages = initialResult.results[0].nbPages || Math.ceil(totalHits / 96);
+                foundMetadata = true;
+            }
+            
+            if (foundMetadata) {
+                finalMaxPages = totalPages;
                 console.log(`API reports ${totalHits} total items across ${finalMaxPages} pages`);
                 
                 // If we don't need to paginate further, use the initial result
@@ -204,6 +263,9 @@ router.get('/', async (req, res) => {
                 finalMaxPages = 10; // Default if metadata not available
                 console.log(`Fetching all pages (up to ${finalMaxPages})`);
                 result = await invaluableScraper.searchAllPages(searchParams, cookies, finalMaxPages);
+                
+                console.debug('API response structure: ' + 
+                    JSON.stringify(initialResult, null, 2).substring(0, 500) + '...');
             }
         } else {
             // Use user-specified maxPages
