@@ -12,40 +12,14 @@ const SearchStorageService = require('../utils/search-storage');
 const searchStorage = new SearchStorageService();
 
 /**
- * Maps a subcategory name to its encoded value for use in URLs
- * @param {string} categoryName - Name of the category (e.g., "Collectibles")
- * @param {string} subcategoryName - Name of the subcategory (e.g., "Memorabilia")
- * @returns {string} - Encoded subcategory value for URL
- */
-function getEncodedSubcategory(categoryName, subcategoryName) {
-  if (!subcategoryName) return null;
-  
-  // Encode the subcategory for URL use
-  let encoded = encodeURIComponent(subcategoryName);
-  
-  // Special double encoding needed for Invaluable's URL structure
-  encoded = encoded.replace(/%/g, '%25')
-                  .replace(/&/g, '%2526')
-                  .replace(/,/g, '%252C')
-                  .replace(/=/g, '%253D')
-                  .replace(/\+/g, '%252B')
-                  .replace(/\//g, '%252F')
-                  .replace(/\s/g, '%2520');
-  
-  return encoded;
-}
-
-/**
  * Build parameters for a search
  * @param {string} keyword - Keyword for search (serves as folder name)
  * @param {string} query - Query for search (serves as subfolder name)
- * @param {string} subcategory - Optional subcategory name
- * @param {string} categoryName - Optional category name (e.g., "Collectibles", "Furniture")
  * @param {number} page - Page number to fetch
  * @param {object} additionalParams - Additional search parameters
  * @returns {object} - Search parameters
  */
-function buildSearchParams(keyword, query, subcategory = null, categoryName = null, page = 1, additionalParams = {}) {
+function buildSearchParams(keyword, query, page = 1, additionalParams = {}) {
   const params = {
     query: query || keyword,
     keyword: keyword,
@@ -53,11 +27,6 @@ function buildSearchParams(keyword, query, subcategory = null, categoryName = nu
     upcoming: 'false',
     ...additionalParams
   };
-  
-  // Add category-specific parameters if provided
-  if (categoryName && subcategory) {
-    params[categoryName] = getEncodedSubcategory(categoryName, subcategory);
-  }
   
   if (page > 1) {
     params.page = page;
@@ -67,7 +36,7 @@ function buildSearchParams(keyword, query, subcategory = null, categoryName = nu
 }
 
 // Endpoint to scrape with dynamic query and keyword 
-router.get('/scrape/:subcategory', async (req, res) => {
+router.get('/scrape', async (req, res) => {
   try {
     const { invaluableScraper } = req.app.locals;
     if (!invaluableScraper) {
@@ -75,12 +44,10 @@ router.get('/scrape/:subcategory', async (req, res) => {
     }
     
     // Get parameters from request
-    const subcategoryName = req.params.subcategory;
     const keyword = req.query.keyword || 'collectible';  // Default keyword
     const query = req.query.query || keyword;  // Default to keyword if not provided
-    const categoryName = req.query.category || null;  // Optional category name
     
-    console.log(`Starting scrape with keyword: ${keyword}, query: ${query}, subcategory: ${subcategoryName}, category: ${categoryName}`);
+    console.log(`Starting scrape with keyword: ${keyword}, query: ${query}`);
     
     // Parse request parameters
     const startPage = parseInt(req.query.startPage) || 1;
@@ -104,7 +71,7 @@ router.get('/scrape/:subcategory', async (req, res) => {
       ];
     
     // Build search parameters
-    const searchParams = buildSearchParams(keyword, query, subcategoryName, categoryName, startPage);
+    const searchParams = buildSearchParams(keyword, query, startPage);
     
     // If maxPages is not specified, first make a single page request to get the total pages
     if (maxPages <= 0 && fetchAllPages) {
@@ -170,7 +137,7 @@ router.get('/scrape/:subcategory', async (req, res) => {
       
       maxPages = totalPages;
       
-      console.log(`API reports ${totalHits} total items across ${maxPages} pages for subcategory "${subcategoryName}"`);
+      console.log(`API reports ${totalHits} total items across ${maxPages} pages for query "${query}"`);
       
       // If we already retrieved page 1, we can use it as the first page result
       if (startPage === 1) {
