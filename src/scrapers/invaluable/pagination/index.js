@@ -93,6 +93,14 @@ async function handlePagination(browser, params, firstPageResults, initialCookie
     const hitsPerPage = firstPageResults.results[0]?.meta?.hitsPerPage || 48;
     totalPages = Math.ceil(totalItems / hitsPerPage);
     
+    // Si totalPages es 0 o muy pequeño pero maxPages es más grande,
+    // usamos maxPages directamente, ya que probablemente fue calculado
+    // correctamente antes de llamar a esta función
+    if ((totalPages === 0 || totalPages === 1) && maxPages > 1) {
+      console.log(`⚠️ No se pudo detectar el número total de páginas. Usando maxPages proporcionado: ${maxPages}`);
+      totalPages = maxPages;
+    }
+    
     // Limitar el número de páginas a procesar
     const pagesToProcess = Math.min(totalPages, maxPages);
     
