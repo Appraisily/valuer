@@ -67,6 +67,49 @@ class SearchStorageService {
   }
   
   /**
+   * Generate folder path for a keyword and query
+   * @param {string} keyword - Main category (e.g., "furniture")
+   * @param {string} query - Specific query (e.g., "chair")
+   * @returns {string} - The folder path in GCS
+   */
+  getFolderPath(keyword, query = null) {
+    const sanitizedKeyword = this.sanitizeName(keyword);
+    
+    if (query) {
+      const sanitizedQuery = this.sanitizeName(query);
+      return `invaluable-data/${sanitizedKeyword}/${sanitizedQuery}/`;
+    } else {
+      return `invaluable-data/${sanitizedKeyword}/`;
+    }
+  }
+  
+  /**
+   * Check if a folder exists in GCS for the given keyword and query
+   * @param {string} keyword - Main category folder (e.g., "furniture")
+   * @param {string} query - Specific query subfolder (e.g., "chair")
+   * @returns {Promise<boolean>} - Whether the folder exists
+   */
+  async folderExists(keyword, query = null) {
+    try {
+      const folderPath = this.getFolderPath(keyword, query);
+      console.log(`Checking if folder exists: gs://${this.bucketName}/${folderPath}`);
+      
+      // In GCS, folders are virtual, so we check for any objects with the prefix
+      const [files] = await this.bucket.getFiles({
+        prefix: folderPath,
+        maxResults: 1  // We only need one file to confirm folder exists
+      });
+      
+      const exists = files.length > 0;
+      console.log(`Folder ${folderPath} ${exists ? 'exists' : 'does not exist'} in GCS`);
+      return exists;
+    } catch (error) {
+      console.error(`Error checking if folder exists: ${error.message}`);
+      return false;
+    }
+  }
+  
+  /**
    * Save single page of results to GCS
    * @param {string} category - Category/search term used (this will be the keyword folder)
    * @param {number} pageNumber - Page number

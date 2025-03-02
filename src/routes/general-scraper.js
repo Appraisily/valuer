@@ -49,6 +49,22 @@ router.get('/scrape', async (req, res) => {
     
     console.log(`Starting scrape with keyword: ${keyword}, query: ${query}`);
     
+    // Check if folder already exists in GCS
+    const folderExists = await searchStorage.folderExists(keyword, query);
+    if (folderExists) {
+      console.log(`Folder already exists for keyword="${keyword}", query="${query}". Skipping scrape.`);
+      return res.json({
+        success: true,
+        message: `Scrape skipped for "${query}" - data already exists`,
+        resultSummary: {
+          folderExists: true,
+          skipped: true
+        }
+      });
+    }
+    
+    console.log(`Folder doesn't exist for keyword="${keyword}", query="${query}". Starting scrape...`);
+    
     // Parse request parameters
     const startPage = parseInt(req.query.startPage) || 1;
     let maxPages = parseInt(req.query.maxPages) || 0; // Default to 0, will be determined from API response
