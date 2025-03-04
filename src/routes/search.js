@@ -61,7 +61,7 @@ router.get('/', async (req, res) => {
     const cookies = [
       {
         name: 'AZTOKEN-PROD',
-        value: '4F562873-F229-4346-A846-37E9A451FA9E',
+        value: '60E0351A-C64E-4D9F-AA6C-5967BBBF859B',
         domain: '.invaluable.com'
       },
       {
